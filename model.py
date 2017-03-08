@@ -9,9 +9,9 @@ from tensorflow.python.ops import variables as tf_variables
 FLAGS = tf.app.flags.FLAGS
 
 # Weight decay of inception network
-tf.app.flags.DEFINE_float("weight_decay", 0.0, "Weight decay of inception network")
+tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception network")
 # Std of uniform initialization
-tf.app.flags.DEFINE_float("init_scale", 0.01, "Std of uniform initialization")
+tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_float("learning_rate", 0.00001, "Start learning rate.")
 # Specify where the Model, trained on ImageNet, was saved.
@@ -116,7 +116,7 @@ class Model(object):
         }
       else:
         gradient_multipliers = {}
-      self.train_op = slim.learning.create_train_op(self.loss, self.optimizer, gradient_multipliers=gradient_multipliers)
+      self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers)
         
   def forward(self, inputs):
     '''run forward pass and return action prediction
@@ -126,7 +126,7 @@ class Model(object):
   def backward(self, inputs, targets):
     '''run forward pass and return action prediction
     '''
-    control, loss, _ = self.sess.run([self.outputs, self.loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets})
+    control, loss, _ = self.sess.run([self.outputs, self.total_loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets})
     
     return control, loss
   
