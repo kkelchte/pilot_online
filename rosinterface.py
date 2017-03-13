@@ -35,8 +35,8 @@ tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being l
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
 tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
-tf.app.flags.DEFINE_float("mean", 0.5173, "Define the mean of the input data for centering around zero.")
-tf.app.flags.DEFINE_float("std", 0.3335, "Define the standard deviation of the data for normalization.")
+tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
+tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 # =================================================
 
@@ -225,11 +225,13 @@ class PilotNode(object):
         im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
         print('batch of images shape: ',im_b.shape)
         controls, batch_loss = self.model.backward(im_b,target_b)
+        activation_images = self.model.plot_activations(im_b)
       else:
-        print('buffer size: ', self.replay_buffer.size())
-        batch_loss = 0    
+        print('filling experience buffer: ', self.replay_buffer.size())
+        batch_loss = 0
+        activation_images = None
       try:
-        sumvar=[self.accumloss, self.distance, batch_loss]
+        sumvar=[self.accumloss, self.distance, batch_loss, activation_images]
         self.model.summarize(self.run, sumvar)
       except Exception as e:
         print('failed to write', e)

@@ -6,6 +6,10 @@ import inception
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 
+import matplotlib.pyplot as plt
+import numpy as np
+import math
+
 FLAGS = tf.app.flags.FLAGS
 
 # Weight decay of inception network
@@ -21,6 +25,7 @@ tf.app.flags.DEFINE_string("model_path", '/home/klaas/tensorflow2/models/incepti
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
 tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
+tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 
 """
 Build basic NN model
@@ -46,9 +51,18 @@ class Model(object):
     # because adam variables are not available in check point.
     # build network from SLIM model
     self.define_network()
-    if not FLAGS.continue_training and not FLAGS.evaluate:
+    if not FLAGS.continue_training:
       checkpoint_path = FLAGS.model_path
-      variables_to_restore = slim.get_variables_to_restore(exclude=["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      list_to_exclude = []
+      if FLAGS.exclude_from_layer <= 7:
+        list_to_exclude.extend(["InceptionV3/Mixed_7a", "InceptionV3/Mixed_7b", "InceptionV3/Mixed_7c"])
+      if FLAGS.exclude_from_layer <= 6:
+        list_to_exclude.extend(["InceptionV3/Mixed_6a", "InceptionV3/Mixed_6b", "InceptionV3/Mixed_6c", "InceptionV3/Mixed_6d", "InceptionV3/Mixed_6e"])
+      if FLAGS.exclude_from_layer <= 5:
+        list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
+      list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      #print list_to_exclude
+      variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(checkpoint_path, variables_to_restore)
     else:
       variables_to_restore = slim.get_variables_to_restore()
@@ -89,7 +103,7 @@ class Model(object):
       with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
                            stddev=FLAGS.init_scale)):
         #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-        self.outputs, _ = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
+        self.outputs, self.endpoints = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
         if(self.bound!=1 or self.bound!=0):
           self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
       
@@ -130,6 +144,55 @@ class Model(object):
     
     return control, loss
   
+  def fig2buf(self, fig):
+    """
+    Convert a plt fig to a numpy buffer
+    """
+    # draw the renderer
+    fig.canvas.draw()
+
+    # Get the RGBA buffer from the figure
+    w,h = fig.canvas.get_width_height()
+    buf = np.fromstring ( fig.canvas.tostring_argb(), dtype=np.uint8 )
+    buf.shape = (h, w, 4)
+    
+    # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
+    buf = np.roll(buf, 3, axis = 2 )
+    buf = buf[0::1,0::1,0:1] #slice to make image 4x smaller and use only the R channel of RGBA
+    #buf = np.resize(buf,(500,500,1))
+    return buf
+  
+  def plot_activations(self, inputs):
+    activation_images = []
+    tensors = []
+    endpoint_names = ['Conv2d_1a_3x3', 'Conv2d_2a_3x3', 'Conv2d_2b_3x3', 'Conv2d_3b_1x1']
+    for endpoint in endpoint_names:
+      tensors.append(self.endpoints[endpoint])
+    units = self.sess.run(tensors, feed_dict={self.inputs:inputs[0:1]})
+    for j, unit in enumerate(units):
+      filters = unit.shape[3]
+      fig = plt.figure(1, figsize=(15,15))
+      fig.suptitle(endpoint_names[j], fontsize=40)
+      n_columns = 6
+      n_rows = math.ceil(filters / n_columns) + 1
+      for i in range(filters):
+          plt.subplot(n_rows, n_columns, i+1)
+          #plt.title('Filter ' + str(i), fontdict={'fontsize':10})
+          plt.imshow(unit[0,:,:,i], interpolation="nearest", cmap="gray")
+          plt.axis('off')
+      #plt.show()
+      buf=self.fig2buf(fig)
+      activation_images.append(buf)
+      plt.clf()
+      plt.close()
+      #plt.matshow(buf[:,:,0], fignum=100, cmap=plt.cm.gray)
+      #plt.axis('off')
+      #plt.show()
+      #import pdb; pdb.set_trace()
+    activation_images = np.asarray(activation_images)
+    
+    return activation_images
+  
   def save(self, run, logfolder):
     '''save a checkpoint'''
     self.saver.save(self.sess, logfolder+'/my-model', global_step=run)
@@ -141,7 +204,9 @@ class Model(object):
     tf.summary.scalar("Distance", distance)
     batch_loss = tf.Variable(0.)
     tf.summary.scalar("Batch_loss", batch_loss)
-    self.summary_vars = [episode_loss, distance, batch_loss]
+    act_images = tf.placeholder(tf.float32, [None, 1200, 1200, 1])
+    tf.summary.image("conv_activations", act_images, max_outputs=4)
+    self.summary_vars = [episode_loss, distance, batch_loss, act_images]
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, run, sumvars):
