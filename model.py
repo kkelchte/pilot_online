@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_string("model_path", '/home/klaas/tensorflow2/models/incepti
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 
@@ -204,7 +204,7 @@ class Model(object):
     tf.summary.scalar("Distance", distance)
     batch_loss = tf.Variable(0.)
     tf.summary.scalar("Batch_loss", batch_loss)
-    act_images = tf.placeholder(tf.float32, [None, 1200, 1200, 1])
+    act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
     tf.summary.image("conv_activations", act_images, max_outputs=4)
     self.summary_vars = [episode_loss, distance, batch_loss, act_images]
     self.summary_ops = tf.summary.merge_all()
