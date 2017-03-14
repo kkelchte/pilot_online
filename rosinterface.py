@@ -226,7 +226,8 @@ class PilotNode(object):
         im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
         print('batch of images shape: ',im_b.shape)
         controls, batch_loss = self.model.backward(im_b,target_b)
-        activation_images = self.model.plot_activations(im_b)
+        if save_activations:
+          activation_images= self.model.plot_activations(im_b)
       else:
         print('filling experience buffer: ', self.replay_buffer.size())
         batch_loss = 0
