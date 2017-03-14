@@ -73,12 +73,12 @@ class Model(object):
         checkpoint_path = FLAGS.checkpoint_path
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     
+      # Add the loss function to the graph.
+      self.define_loss()
+      
     if not FLAGS.evaluate:
       # create saver for checkpoints
       self.saver = tf.train.Saver()
-      
-      # Add the loss function to the graph.
-      self.define_loss()
       
       # Define the training op based on the total loss
       self.define_train()
@@ -134,11 +134,14 @@ class Model(object):
         gradient_multipliers = {}
       self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers)
         
-  def forward(self, inputs):
+  def forward(self, inputs, targets=None):
     '''run forward pass and return action prediction
     '''
-    return self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
-  
+    if targets == None:
+      return self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
+    else:
+      return self.sess.run([self.outputs, self.total_loss], feed_dict={self.inputs: inputs, self.targets: targets})
+    
   def backward(self, inputs, targets):
     '''run forward pass and return action prediction
     '''

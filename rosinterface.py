@@ -110,40 +110,33 @@ class PilotNode(object):
     rospy.init_node('pilot', anonymous=True)
     self.delay_evaluation = 0
     if rospy.has_param('delay_evaluation'):
-      self.delay_evaluation=rospy.get_param('delay_evaluation')
-    
-    if not FLAGS.evaluate:
+      self.delay_evaluation=rospy.get_param('delay_evaluation')  
+    if FLAGS.real: # in the real world on the bebop drone
+      rospy.Subscriber('/bebop/image_raw', Image, self.image_callback)
+      self.action_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
+      rospy.Subscriber('/bebop/ready', Empty, self.ready_callback)
+      rospy.Subscriber('/bebop/overtake', Empty, self.overtake_callback)
+    else: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
       rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
-      rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
-      rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
       self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
       rospy.Subscriber('/ready', Empty, self.ready_callback)
       rospy.Subscriber('/finished', Empty, self.finished_callback)
-    else: # in case of evaluation:
-      if FLAGS.real: # in the real world on the bebop drone
-        rospy.Subscriber('/bebop/image_raw', Image, self.image_callback)
-        self.action_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
-        rospy.Subscriber('/bebop/ready', Empty, self.ready_callback)
-        rospy.Subscriber('/bebop/overtake', Empty, self.overtake_callback)
-      else: # in simulation
-        rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
-        self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        rospy.Subscriber('/ready', Empty, self.ready_callback)
-        rospy.Subscriber('/finished', Empty, self.overtake_callback)
-        self.finished=True
-        #rospy.Subscriber('/ardrone/overtake', Empty, self.overtake_callback)
+      #rospy.Subscriber('/finished', Empty, self.overtake_callback)
+      #rospy.Subscriber('/ardrone/overtake', Empty, self.overtake_callback)
+      rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
+      rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
       
   def overtake_callback(self, data):
     if self.ready:
-      print('Neural control deactivated')
+      print('Neural control overtaken.')
       self.finished = True
       self.ready = False
       
   def ready_callback(self,msg):
     if not self.ready and self.finished:
-      print('Neural control activated')
+      print('Neural control activated.')
       self.ready = True
       self.start_time = rospy.get_time()
       self.finished = False
@@ -225,11 +218,14 @@ class PilotNode(object):
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
         print('batch of images shape: ',im_b.shape)
-        controls, batch_loss = self.model.backward(im_b,target_b)
-        if save_activations:
+        if FLAGS.evaluate:
+          controls, batch_loss = self.model.forward(im_b,target_b)
+        else:
+          controls, batch_loss = self.model.backward(im_b,target_b)
+        if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
       else:
-        print('filling experience buffer: ', self.replay_buffer.size())
+        print('filling buffer: ', self.replay_buffer.size())
         batch_loss = 0
       try:
         if FLAGS.save_activations:
@@ -247,7 +243,7 @@ class PilotNode(object):
         self.distance = 0
       
       self.run+=1 
-      if self.run%20==0:
+      if self.run%20==0 and not FLAGS.evaluate:
         # Save a checkpoint every 100 runs.
         self.model.save(self.run, self.logfolder)
       
