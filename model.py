@@ -17,7 +17,7 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception ne
 # Std of uniform initialization
 tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 # Base learning rate
-tf.app.flags.DEFINE_float("learning_rate", 0.00001, "Start learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.001, "Start learning rate.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", '/home/klaas/tensorflow2/models/inception_v3.ckpt', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
@@ -26,6 +26,7 @@ tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/20
 tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
+tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
 
 """
 Build basic NN model
@@ -120,7 +121,8 @@ class Model(object):
     '''
     with tf.device(self.device):
       # Specify the optimizer and create the train op:  
-      self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
+      #self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
+      self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
       if FLAGS.grad_mul:
@@ -204,9 +206,12 @@ class Model(object):
     tf.summary.scalar("Distance", distance)
     batch_loss = tf.Variable(0.)
     tf.summary.scalar("Batch_loss", batch_loss)
-    act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
-    tf.summary.image("conv_activations", act_images, max_outputs=4)
-    self.summary_vars = [episode_loss, distance, batch_loss, act_images]
+    if FLAGS.save_activations:
+      act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
+      tf.summary.image("conv_activations", act_images, max_outputs=4)
+      self.summary_vars = [episode_loss, distance, batch_loss, act_images]
+    else:
+      self.summary_vars = [episode_loss, distance, batch_loss]
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, run, sumvars):

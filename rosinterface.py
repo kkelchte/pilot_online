@@ -221,6 +221,7 @@ class PilotNode(object):
       self.finished=True
       # Train model from experience replay:
       # Train the model with batchnormalization out of the image callback loop
+      activation_images = None
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
         print('batch of images shape: ',im_b.shape)
@@ -229,9 +230,11 @@ class PilotNode(object):
       else:
         print('filling experience buffer: ', self.replay_buffer.size())
         batch_loss = 0
-        activation_images = None
       try:
-        sumvar=[self.accumloss, self.distance, batch_loss, activation_images]
+        if FLAGS.save_activations:
+          sumvar=[self.accumloss, self.distance, batch_loss, activation_images]
+        else:
+          sumvar=[self.accumloss, self.distance, batch_loss]
         self.model.summarize(self.run, sumvar)
       except Exception as e:
         print('failed to write', e)
@@ -241,11 +244,12 @@ class PilotNode(object):
         self.accumloss = 0
         self.maxy = -10
         self.distance = 0
+      
+      self.run+=1 
       if self.run%20==0:
         # Save a checkpoint every 100 runs.
         self.model.save(self.run, self.logfolder)
       
-      self.run+=1 
       # wait for gzserver to be killed
       gzservercount=1
       while gzservercount > 0:
