@@ -242,18 +242,21 @@ class PilotNode(object):
       # Train model from experience replay:
       # Train the model with batchnormalization out of the image callback loop
       activation_images = None
+      tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
           im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('batch of images shape: ',im_b.shape)
           if FLAGS.evaluate:
             controls, batch_loss = self.model.forward(im_b,target_b)
+            tot_batch_loss = [batch_loss]
             break
           else:
             controls, batch_loss = self.model.backward(im_b,target_b)
+            tot_batch_loss.append(batch_loss)
         if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
-         
+        batch_loss = np.mean(tot_batch_loss)
       else:
         print('filling buffer or no experience_replay: ', self.replay_buffer.size())
         batch_loss = 0
