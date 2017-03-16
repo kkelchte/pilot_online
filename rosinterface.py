@@ -217,7 +217,7 @@ class PilotNode(object):
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
       self.runfile.close()
     msg = Twist()
-    msg.linear.x = 0.4
+    msg.linear.x = 0.8
     msg.angular.z = control[0,0]
     self.action_pub.publish(msg)
   
@@ -243,14 +243,17 @@ class PilotNode(object):
       # Train the model with batchnormalization out of the image callback loop
       activation_images = None
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
-        im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
-        print('batch of images shape: ',im_b.shape)
-        if FLAGS.evaluate:
-          controls, batch_loss = self.model.forward(im_b,target_b)
-        else:
-          controls, batch_loss = self.model.backward(im_b,target_b)
+        for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
+          im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          #print('batch of images shape: ',im_b.shape)
+          if FLAGS.evaluate:
+            controls, batch_loss = self.model.forward(im_b,target_b)
+            break
+          else:
+            controls, batch_loss = self.model.backward(im_b,target_b)
         if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
+         
       else:
         print('filling buffer or no experience_replay: ', self.replay_buffer.size())
         batch_loss = 0
