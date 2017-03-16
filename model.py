@@ -1,8 +1,8 @@
 import tensorflow as tf
 import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
-#from tensorflow.contrib.slim.nets import inception
 import inception
+import fc_control
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 
@@ -40,6 +40,8 @@ class Model(object):
     self.output_size = output_size
     self.bound=bound
     self.input_size = input_size
+    self.input_size[0] = None
+    #print 'input size: ',self.input_size
     self.prefix = prefix
     self.device = device
     self.writer = writer
@@ -50,9 +52,11 @@ class Model(object):
       #self.initializer = tf.random_uniform_initializer(-init_scale, init_scale)
     # need to catch variables to restore before defining the training op
     # because adam variables are not available in check point.
+    
     # build network from SLIM model
     self.define_network()
-    if not FLAGS.continue_training:
+    
+    if FLAGS.network == 'inception' and not FLAGS.continue_training:
       checkpoint_path = FLAGS.model_path
       list_to_exclude = []
       if FLAGS.exclude_from_layer <= 7:
@@ -65,17 +69,17 @@ class Model(object):
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(checkpoint_path, variables_to_restore)
-    else:
+    if FLAGS.continue_training:
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
         checkpoint_path = '/home/klaas/tensorflow2/log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
-    
-      # Add the loss function to the graph.
-      self.define_loss()
       
+    # Add the loss function to the graph.
+    self.define_loss()
+        
     if not FLAGS.evaluate:
       # create saver for checkpoints
       self.saver = tf.train.Saver()
@@ -88,26 +92,34 @@ class Model(object):
     
     init_all=tf_variables.global_variables_initializer()
     self.sess.run([init_all])
-    self.sess.run([init_assign_op], init_feed_dict)
-    #self.sess.run([init_all,init_assign_op], init_feed_dict)
-    print('Successfully loaded model:',checkpoint_path)
+    if FLAGS.network == 'inception' or FLAGS.continue_training:
+      self.sess.run([init_assign_op], init_feed_dict)
+      #self.sess.run([init_all,init_assign_op], init_feed_dict)
+      print('Successfully loaded model:',checkpoint_path)
     
   def define_network(self):
     '''build the network and set the tensors
     '''
     with tf.device(self.device):
-      self.inputs = tf.placeholder(tf.float32, shape = [None, self.input_size, self.input_size, 3])
-      #inputs = tf.placeholder(tf.float32, shape = [None, 299, 299, 3])
-      ### initializer is defined in the arg scope of inception.
-      ### need to stick to this arg scope in order to load the inception checkpoint properly...
-      ### weights are now initialized uniformly 
-      with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
-                           stddev=FLAGS.init_scale)):
-        #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-        self.outputs, self.endpoints = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
-        if(self.bound!=1 or self.bound!=0):
-          self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
-      
+      self.inputs = tf.placeholder(tf.float32, shape = self.input_size)
+      if FLAGS.network == 'inception':
+        #inputs = tf.placeholder(tf.float32, shape = [None, 299, 299, 3])
+        ### initializer is defined in the arg scope of inception.
+        ### need to stick to this arg scope in order to load the inception checkpoint properly...
+        ### weights are now initialized uniformly 
+        with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
+                            stddev=FLAGS.init_scale)):
+          #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
+          self.outputs, self.endpoints = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
+          if(self.bound!=1 or self.bound!=0):
+            self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
+      else: #in case of fc_control
+        with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
+                            stddev=FLAGS.init_scale)):
+          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=True)
+          if(self.bound!=1 or self.bound!=0):
+            self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
+            
   def define_loss(self):
     '''tensor for calculating the loss
     '''

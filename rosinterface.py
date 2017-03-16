@@ -33,11 +33,12 @@ tf.app.flags.DEFINE_string("rundir", 'runs', "Choose location to keep the trajec
 tf.app.flags.DEFINE_integer("num_flights", 1000, "the maximum number of tries.")
 tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being learned.")
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
-tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
+tf.app.flags.DEFINE_integer("buffer_size", 100, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
 tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
+tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
 # =================================================
 
 launch_popen=None
@@ -119,7 +120,10 @@ class PilotNode(object):
     else: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
-      rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
+      if not FLAGS.depth_input:
+        rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
+      else:
+        rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
       self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
       rospy.Subscriber('/ready', Empty, self.ready_callback)
       rospy.Subscriber('/finished', Empty, self.finished_callback)
@@ -159,7 +163,7 @@ class PilotNode(object):
     if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
     try:
       # Convert your ROS Image message to OpenCV2
-      cv2_img = bridge.imgmsg_to_cv2(data,'bgr8')
+      cv2_img = bridge.imgmsg_to_cv2(data, 'bgr8') 
     except CvBridgeError as e:
       print(e)
     else:
@@ -172,28 +176,51 @@ class PilotNode(object):
       # Basic preprocessing: center + make 1 standard deviation
       im -= FLAGS.mean
       im = im*1/FLAGS.std
+      self.process_input(im)
+
+  def depth_image_callback(self, data):
+    if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
+    try:
+      # Convert your ROS Image message to OpenCV2
+      im = bridge.imgmsg_to_cv2(data, desired_encoding='passthrough')#gets float of 32FC1 depth image
+    except CvBridgeError as e:
+      print(e)
+    else:
+      # crop image to get 1 line in the middle
+      row = int(im.shape[0]/2.)
+      step_colums = int(im.shape[1]/64.)
+      arr = im[row, ::step_colums]
+      arr_clean = [e if not np.isnan(e) else 5 for e in arr]
+      arr_clean = np.array(arr_clean)
+      arr_clean = arr_clean*1/5.-0.5
+      #print(arr_clean)
+      self.process_input(arr_clean)
       
-      #print(im.shape)
-      if self.target_control: 
-        trgt = self.target_control[5]
-        if FLAGS.experience_replay:
-          # add the experience to the replay buffer
-          self.replay_buffer.add(im,[trgt])
-          control = self.model.forward([im])
-        if not FLAGS.experience_replay:
-          control, loss = self.model.backward([im],[[trgt]])
-          print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
-          self.accumloss += loss
-      else:
+      
+    
+  def process_input(self, im):
+    #print(im.shape)
+    if self.target_control and not FLAGS.evaluate: 
+      trgt = self.target_control[5]
+      if FLAGS.experience_replay:
+        # add the experience to the replay buffer
+        self.replay_buffer.add(im,[trgt])
         control = self.model.forward([im])
-      if self.last_position:
-        self.runfile = open(self.logfolder+'/runs.txt', 'a')
-        self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-        self.runfile.close()
-      msg = Twist()
-      msg.linear.x = 0.4
-      msg.angular.z = control[0,0]
-      self.action_pub.publish(msg)
+      if not FLAGS.experience_replay:
+        control, loss = self.model.backward([im],[[trgt]])
+        print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
+        self.accumloss += loss
+    else:
+      control = self.model.forward([im])
+    if self.last_position:
+      self.runfile = open(self.logfolder+'/runs.txt', 'a')
+      self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
+      self.runfile.close()
+    msg = Twist()
+    msg.linear.x = 0.4
+    msg.angular.z = control[0,0]
+    self.action_pub.publish(msg)
+  
       
   
   def supervised_callback(self, data):
@@ -225,7 +252,7 @@ class PilotNode(object):
         if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
       else:
-        print('filling buffer: ', self.replay_buffer.size())
+        print('filling buffer or no experience_replay: ', self.replay_buffer.size())
         batch_loss = 0
       try:
         if FLAGS.save_activations:
@@ -242,11 +269,11 @@ class PilotNode(object):
         self.maxy = -10
         self.distance = 0
       
-      self.run+=1 
       if self.run%20==0 and not FLAGS.evaluate:
         # Save a checkpoint every 100 runs.
         self.model.save(self.run, self.logfolder)
       
+      self.run+=1 
       # wait for gzserver to be killed
       gzservercount=1
       while gzservercount > 0:

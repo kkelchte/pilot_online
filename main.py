@@ -7,7 +7,6 @@ import xml.etree.cElementTree as ET
 import tensorflow as tf
 import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
-from tensorflow.contrib.slim.nets import inception
 from tensorflow.contrib.slim.python.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 from tensorflow.python.ops import random_ops
@@ -18,6 +17,10 @@ from std_msgs.msg import Empty
 import numpy as np
 from model import Model
 import rosinterface
+
+#models:
+import inception
+import fc_control
 
 import sys, os, os.path
 import subprocess
@@ -52,6 +55,7 @@ tf.app.flags.DEFINE_float("action_bound", 1.0, "Define between what bounds the a
 tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacting with the real (bebop) drone.")
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
+tf.app.flags.DEFINE_string("network", 'inception', "Define the type of network: inception / fc_control.")
 # ===========================
 #   Save settings
 # ===========================
@@ -87,8 +91,14 @@ def main(_):
   np.random.seed(FLAGS.random_seed)
   tf.set_random_seed(FLAGS.random_seed)
   
-  #define the size of the image: SxS
-  state_dim = inception.inception_v3.default_image_size
+  #define the size of the network input
+  if FLAGS.network == 'inception':
+    state_dim = [1, inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
+  elif FLAGS.network == 'fc_control':
+    state_dim = [1, fc_control.fc_control_v1.input_size]
+  else:
+    raise NameError( 'Network is unknown: ', FLAGS.network)
+  
   action_dim = 1 #initially only turn and go straight
   
   print( "Number of State Dimensions:", state_dim)
@@ -98,16 +108,16 @@ def main(_):
   tf.logging.set_verbosity(tf.logging.DEBUG)
   
   # Random input from tensorflow (could be placeholder)
-  images=random_ops.random_uniform((1,state_dim,state_dim,3))
+  inputs=random_ops.random_uniform(state_dim)
   targets=random_ops.random_uniform((1,action_dim))
   
   config=tf.ConfigProto(allow_soft_placement=True)
-  config.gpu_options.allow_growth = True
+  config.gpu_options.allow_growth = False #True Adjusted as during evaluation it takes too long to load a model
   sess = tf.Session(config=config)
   writer = tf.summary.FileWriter(FLAGS.summary_dir+FLAGS.log_tag, sess.graph)
+  
   model = Model(sess, state_dim, action_dim, writer=writer, bound=FLAGS.action_bound)
-  #model=None
-  #import pdb; pdb.set_trace()
+  
   if FLAGS.launch_ros:
     rosinterface.launch()
   rosnode = rosinterface.PilotNode(model, FLAGS.summary_dir+FLAGS.log_tag)
@@ -127,8 +137,15 @@ def main(_):
   #rospy.Subscriber('/roskill', Empty, kill_callback)
 
   #for i in range(10):
-    #inpt, trgt = sess.run([images, targets])
+    #inpt, trgt = sess.run([inputs, targets])
+    #print('input: ', inpt,' trgt: ',trgt)
+    #action = model.forward(inpt)
+    #print('fw: output: ', action)
+    #action, loss = model.forward(inpt, trgt)
+    #print('fw + l: output: ', action,' loss: ',loss)
     #action, loss = model.backward(inpt, trgt)
+    #print('bw: output: ', action,' loss: ',loss)
+    
     #model.summarize(i, [loss, 10])
   #import pdb; pdb.set_trace()
   
