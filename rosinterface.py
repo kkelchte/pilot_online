@@ -245,8 +245,9 @@ class PilotNode(object):
       tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
+          st = time.time()
           im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
-          #print('batch of images shape: ',im_b.shape)
+          print('time to smaple batch of images: ',time.time()-st)
           if FLAGS.evaluate:
             controls, batch_loss = self.model.forward(im_b,target_b)
             tot_batch_loss = [batch_loss]
@@ -270,7 +271,7 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, batch loss: {3:0.3f}]'.format(rospy.get_time(), self.accumloss, self.distance, batch_loss))
+        print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, batch loss: {3:0.3f}]'.format(self.run, self.accumloss, self.distance, batch_loss))
         self.accumloss = 0
         self.maxy = -10
         self.distance = 0
