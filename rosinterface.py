@@ -146,6 +146,7 @@ class PilotNode(object):
       self.finished = False
     
   def gt_callback(self, data):
+    if not self.ready: return
     current_pos=[data.pose.pose.position.x,
                     data.pose.pose.position.y,
                     data.pose.pose.position.z]
@@ -221,8 +222,6 @@ class PilotNode(object):
     msg.angular.z = control[0,0]
     self.action_pub.publish(msg)
   
-      
-  
   def supervised_callback(self, data):
     if not self.ready: return
     else:
@@ -245,16 +244,13 @@ class PilotNode(object):
       tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
-          st = time.time()
           im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
-          print('time to smaple batch of images: ',time.time()-st)
+          #print('time to smaple batch of images: ',time.time()-st)
           if FLAGS.evaluate:
             controls, batch_loss = self.model.forward(im_b,target_b)
-            tot_batch_loss = [batch_loss]
-            break
           else:
             controls, batch_loss = self.model.backward(im_b,target_b)
-            tot_batch_loss.append(batch_loss)
+          tot_batch_loss.append(batch_loss)
         if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
         batch_loss = np.mean(tot_batch_loss)
@@ -266,19 +262,19 @@ class PilotNode(object):
           sumvar=[self.accumloss, self.distance, batch_loss, activation_images]
         else:
           sumvar=[self.accumloss, self.distance, batch_loss]
-        self.model.summarize(self.run, sumvar)
+        self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)
         pass
       else:
         print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, batch loss: {3:0.3f}]'.format(self.run, self.accumloss, self.distance, batch_loss))
-        self.accumloss = 0
-        self.maxy = -10
-        self.distance = 0
+      self.accumloss = 0
+      self.maxy = -10
+      self.distance = 0
       
       if self.run%20==0 and not FLAGS.evaluate:
         # Save a checkpoint every 100 runs.
-        self.model.save(self.run, self.logfolder)
+        self.model.save(self.logfolder)
       
       self.run+=1 
       # wait for gzserver to be killed

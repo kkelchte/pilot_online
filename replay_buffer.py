@@ -8,7 +8,7 @@ import numpy as np
 import tensorflow as tf
 
 FLAGS = tf.app.flags.FLAGS
-tf.app.flags.DEFINE_boolean("weight_replay", True, "Let more recent experience be more likely to be sampled from the batch.")
+tf.app.flags.DEFINE_boolean("weight_replay", False, "Let more recent experience be more likely to be sampled from the batch.")
 
 
 class ReplayBuffer(object):

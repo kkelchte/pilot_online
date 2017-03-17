@@ -153,6 +153,7 @@ def main(_):
   def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')
     if FLAGS.launch_ros:
+      #model.save(FLAGS.summary_dir+FLAGS.log_tag)
       rosinterface.close()
     sess.close()
     print('done.')

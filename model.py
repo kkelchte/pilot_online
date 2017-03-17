@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_string("model_path", '/home/klaas/tensorflow2/models/incepti
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
@@ -54,6 +54,7 @@ class Model(object):
     # because adam variables are not available in check point.
     
     # build network from SLIM model
+    self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
     if FLAGS.network == 'inception' and not FLAGS.continue_training:
@@ -65,6 +66,7 @@ class Model(object):
         list_to_exclude.extend(["InceptionV3/Mixed_6a", "InceptionV3/Mixed_6b", "InceptionV3/Mixed_6c", "InceptionV3/Mixed_6d", "InceptionV3/Mixed_6e"])
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
+      
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
@@ -110,7 +112,7 @@ class Model(object):
         with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-          self.outputs, self.endpoints = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
+          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
       else: #in case of fc_control
@@ -144,7 +146,7 @@ class Model(object):
         }
       else:
         gradient_multipliers = {}
-      self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers)
+      self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers, global_step=self.global_step)
         
   def forward(self, inputs, targets=None):
     '''run forward pass and return action prediction
@@ -210,9 +212,9 @@ class Model(object):
     
     return activation_images
   
-  def save(self, run, logfolder):
+  def save(self, logfolder):
     '''save a checkpoint'''
-    self.saver.save(self.sess, logfolder+'/my-model', global_step=run)
+    self.saver.save(self.sess, logfolder+'/my-model', global_step=tf.train.global_step(self.sess, self.global_step))
   
   def build_summaries(self): 
     episode_loss = tf.Variable(0.)
@@ -229,12 +231,12 @@ class Model(object):
       self.summary_vars = [episode_loss, distance, batch_loss]
     self.summary_ops = tf.summary.merge_all()
 
-  def summarize(self, run, sumvars):
+  def summarize(self, sumvars):
     '''write summary vars with ops'''
     if self.writer:
       feed_dict={self.summary_vars[i]:sumvars[i] for i in range(len(sumvars))}
       summary_str = self.sess.run(self.summary_ops, feed_dict=feed_dict)
-      self.writer.add_summary(summary_str, run)
+      self.writer.add_summary(summary_str,  tf.train.global_step(self.sess, self.global_step))
       self.writer.flush()
     
   
