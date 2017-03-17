@@ -56,6 +56,8 @@ tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacti
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
 tf.app.flags.DEFINE_string("network", 'inception', "Define the type of network: inception / fc_control.")
+tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
+
 # ===========================
 #   Save settings
 # ===========================
@@ -106,10 +108,10 @@ def main(_):
   print( "Action bound:", FLAGS.action_bound)\
   
   tf.logging.set_verbosity(tf.logging.DEBUG)
-  
-  # Random input from tensorflow (could be placeholder)
   inputs=random_ops.random_uniform(state_dim)
   targets=random_ops.random_uniform((1,action_dim))
+  depth_targets=random_ops.random_uniform((1,1,1,64))
+  
   
   config=tf.ConfigProto(allow_soft_placement=True)
   config.gpu_options.allow_growth = False #True Adjusted as during evaluation it takes too long to load a model
@@ -136,19 +138,21 @@ def main(_):
   
   #rospy.Subscriber('/roskill', Empty, kill_callback)
 
-  #for i in range(10):
-    #inpt, trgt = sess.run([inputs, targets])
-    #print('input: ', inpt,' trgt: ',trgt)
-    #action = model.forward(inpt)
-    #print('fw: output: ', action)
-    #action, loss = model.forward(inpt, trgt)
-    #print('fw + l: output: ', action,' loss: ',loss)
-    #action, loss = model.backward(inpt, trgt)
-    #print('bw: output: ', action,' loss: ',loss)
-    
-    #model.summarize(i, [loss, 10])
-  #import pdb; pdb.set_trace()
+  # Random input from tensorflow (could be placeholder)
   
+  ##for i in range(10):
+  #inpt, trgt, dtrgt = sess.run([inputs, targets, depth_targets])
+    ##print('input: ', inpt,' trgt: ',trgt,'dtrgt:', dtrgt)
+    ##action = model.forward(inpt)
+    ##print('fw: output: ', action)
+  #res = model.backward(inpt, trgt, dtrgt)
+    ##print('bw: {0}'.format(res))
+    ##action, loss, depth_action, depth_loss, total, dtotal = model.backward(inpt, trgt, dtrgt)
+    ##print('bw: output: {0} loss: {1} \n depth output: {2} depth loss: {3} \n total loss {4} total loss depth {5}'.format(action, loss, depth_action, depth_loss, total, dtotal))
+  #import pdb; pdb.set_trace()
+   
+    #model.summarize(i, [loss, 10])
+  #
   
   def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')

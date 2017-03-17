@@ -241,33 +241,46 @@ class PilotNode(object):
       # Train model from experience replay:
       # Train the model with batchnormalization out of the image callback loop
       activation_images = None
-      tot_batch_loss = []
+      closs = [] #control loss
+      dloss = [] #depth loss
+      tloss = [] #total loss
+      #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
-          im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          #im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
           if FLAGS.evaluate:
-            controls, batch_loss = self.model.forward(im_b,target_b)
+            controls, loss = self.model.forward(batch[0],batch[1])
+            losses = [loss, 0, 0]
           else:
-            controls, batch_loss = self.model.backward(im_b,target_b)
-          tot_batch_loss.append(batch_loss)
+            controls, losses = self.model.backward(batch[0],batch[1])
+            if len(losses) == 2: losses.append(0) #in case there is no depth
+          tloss.append(losses[0])
+          closs.append(losses[1])
+          dloss.append(losses[2])
+        tloss = np.mean(tloss)
+        closs = np.mean(closs)
+        dloss = np.mean(dloss)
+        #batch_loss = np.mean(tot_batch_loss)
         if FLAGS.save_activations:
           activation_images= self.model.plot_activations(im_b)
-        batch_loss = np.mean(tot_batch_loss)
       else:
         print('filling buffer or no experience_replay: ', self.replay_buffer.size())
-        batch_loss = 0
+        tloss = 0
+        closs = 0
+        dloss = 0
       try:
         if FLAGS.save_activations:
-          sumvar=[self.accumloss, self.distance, batch_loss, activation_images]
+          sumvar=[self.accumloss, self.distance, tloss, closs, dloss, activation_images]
         else:
-          sumvar=[self.accumloss, self.distance, batch_loss]
+          sumvar=[self.accumloss, self.distance, tloss, closs, dloss]
         self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)
         pass
       else:
-        print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, batch loss: {3:0.3f}]'.format(self.run, self.accumloss, self.distance, batch_loss))
+        print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, total loss: {3:0.3f}, control loss: {4:0.3f}, depth loss: {5:0.3f}]'.format(self.run, self.accumloss, self.distance, tloss, closs, dloss))
       self.accumloss = 0
       self.maxy = -10
       self.distance = 0

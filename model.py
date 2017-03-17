@@ -27,7 +27,6 @@ tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the tra
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
-
 """
 Build basic NN model
 """
@@ -84,7 +83,7 @@ class Model(object):
         
     if not FLAGS.evaluate:
       # create saver for checkpoints
-      self.saver = tf.train.Saver()
+      self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=2, max_to_keep=10)
       
       # Define the training op based on the total loss
       self.define_train()
@@ -128,6 +127,9 @@ class Model(object):
     with tf.device(self.device):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       self.loss = losses.mean_squared_error(self.outputs, self.targets)
+      if FLAGS.auxiliary_depth:
+        self.depth_targets = tf.placeholder(tf.float32, [None,1,1, 64])
+        self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets)
       self.total_loss = losses.get_total_loss()
       
   def define_train(self):
@@ -154,14 +156,19 @@ class Model(object):
     if targets == None:
       return self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
     else:
-      return self.sess.run([self.outputs, self.total_loss], feed_dict={self.inputs: inputs, self.targets: targets})
+      control, tloss, closs = self.sess.run([self.outputs, self.total_loss, self.loss], feed_dict={self.inputs: inputs, self.targets: targets})
+      return control, [tloss, closs]
     
-  def backward(self, inputs, targets):
+  def backward(self, inputs, targets, depth_targets=None):
     '''run forward pass and return action prediction
     '''
-    control, loss, _ = self.sess.run([self.outputs, self.total_loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets})
-    
-    return control, loss
+    if not FLAGS.auxiliary_depth:
+      control, tloss, closs, _ = self.sess.run([self.outputs, self.total_loss, self.loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets})
+      losses = [tloss, closs]
+    else:
+      control, tloss, closs, dloss = self.sess.run([self.outputs, self.total_loss, self.loss, self.depth_loss], feed_dict={self.inputs: inputs, self.targets: targets, self.depth_targets:depth_targets})
+      losses = [tloss, closs, dloss]
+    return control, losses
   
   def fig2buf(self, fig):
     """
@@ -221,14 +228,18 @@ class Model(object):
     tf.summary.scalar("Loss", episode_loss)
     distance = tf.Variable(0.)
     tf.summary.scalar("Distance", distance)
-    batch_loss = tf.Variable(0.)
-    tf.summary.scalar("Batch_loss", batch_loss)
+    total_loss = tf.Variable(0.)
+    control_loss = tf.Variable(0.)
+    depth_loss = tf.Variable(0.)
+    tf.summary.scalar("Total_loss", total_loss)
+    tf.summary.scalar("Control_loss", control_loss)
+    tf.summary.scalar("Depth_loss", depth_loss)
     if FLAGS.save_activations:
       act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
       tf.summary.image("conv_activations", act_images, max_outputs=4)
-      self.summary_vars = [episode_loss, distance, batch_loss, act_images]
+      self.summary_vars = [episode_loss, distance, total_loss, control_loss, depth_loss, act_images]
     else:
-      self.summary_vars = [episode_loss, distance, batch_loss]
+      self.summary_vars = [episode_loss, distance, total_loss, control_loss, depth_loss]
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, sumvars):
