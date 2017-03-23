@@ -25,8 +25,10 @@ class ReplayBuffer(object):
         #random.seed(random_seed)
         np.random.seed(random_seed)
 
-    def add(self, state, target):
+    def add(self, state, target, aux_target=None):
         experience = (state, target)
+        if aux_target:
+            experience = (state, target, aux_target)
         if self.count < self.buffer_size: 
             self.buffer.append(experience)
             self.count += 1
@@ -48,13 +50,13 @@ class ReplayBuffer(object):
           # Add different distribution: exponentially/gaussian decaying over time.
           #batch = random.sample(self.buffer, self.count)
           if FLAGS.weight_replay:
-            inds = np.random.choice(range(self.count), self.count, p=list(self.softmax(2.5*np.log(range(self.count)))))
+            inds = np.random.choice(range(self.count), self.count, p=list(self.softmax(2.5*np.log(range(1,1+self.count)))))
           else:
             inds = np.random.choice(range(self.count), self.count)
         else:
           #batch = random.sample(self.buffer, batch_size)
           if FLAGS.weight_replay:
-            inds = np.random.choice(range(batch_size), batch_size, p=list(self.softmax(2.5*np.log(range(batch_size)))))
+            inds = np.random.choice(range(batch_size), batch_size, p=list(self.softmax(2.5*np.log(range(1,1+batch_size)))))
           else:
             inds = np.random.choice(range(batch_size), batch_size)
             
@@ -62,8 +64,11 @@ class ReplayBuffer(object):
         batch = [ self.buffer[i] for i in inds]
         state_batch = np.array([_[0] for _ in batch])
         target_batch = np.array([_[1] for _ in batch])
-        
-        return state_batch, target_batch
+        aux_batch = None
+        if len(batch[0]) == 3:
+            aux_batch = np.array([_[2] for _ in batch])
+
+        return state_batch, target_batch, aux_batch
 
     def clear(self):
         #self.deque.clear()

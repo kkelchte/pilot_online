@@ -19,7 +19,7 @@ tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Start learning rate.")
 # Specify where the Model, trained on ImageNet, was saved.
-tf.app.flags.DEFINE_string("model_path", '/home/klaas/tensorflow2/models/inception_v3.ckpt', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
+tf.app.flags.DEFINE_string("model_path", 'inception', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
@@ -27,6 +27,7 @@ tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the tra
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
+tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
 """
 Build basic NN model
 """
@@ -57,7 +58,11 @@ class Model(object):
     self.define_network()
     
     if FLAGS.network == 'inception' and not FLAGS.continue_training:
-      checkpoint_path = FLAGS.model_path
+      if FLAGS.model_path[0]!='/':
+        checkpoint_path = '/home/klaas/tensorflow2/log/'+FLAGS.model_path
+      else:
+        checkpoint_path = FLAGS.model_path
+        
       list_to_exclude = []
       if FLAGS.exclude_from_layer <= 7:
         list_to_exclude.extend(["InceptionV3/Mixed_7a", "InceptionV3/Mixed_7b", "InceptionV3/Mixed_7c"])
@@ -69,7 +74,7 @@ class Model(object):
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
-      init_assign_op, init_feed_dict = slim.assign_from_checkpoint(checkpoint_path, variables_to_restore)
+      init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     if FLAGS.continue_training:
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
@@ -117,7 +122,7 @@ class Model(object):
       else: #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
-          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=True)
+          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob)
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
             
@@ -137,8 +142,8 @@ class Model(object):
     '''
     with tf.device(self.device):
       # Specify the optimizer and create the train op:  
-      #self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
-      self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
+      self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
+      #self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
       if FLAGS.grad_mul:
@@ -166,7 +171,7 @@ class Model(object):
       control, tloss, closs, _ = self.sess.run([self.outputs, self.total_loss, self.loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets})
       losses = [tloss, closs]
     else:
-      control, tloss, closs, dloss = self.sess.run([self.outputs, self.total_loss, self.loss, self.depth_loss], feed_dict={self.inputs: inputs, self.targets: targets, self.depth_targets:depth_targets})
+      control, tloss, closs, dloss, _ = self.sess.run([self.outputs, self.total_loss, self.loss, self.depth_loss, self.train_op], feed_dict={self.inputs: inputs, self.targets: targets, self.depth_targets:depth_targets})
       losses = [tloss, closs, dloss]
     return control, losses
   
@@ -225,15 +230,15 @@ class Model(object):
   
   def build_summaries(self): 
     episode_loss = tf.Variable(0.)
-    tf.summary.scalar("Loss", episode_loss)
+    tf.summary.scalar("Episode_loss", episode_loss)
     distance = tf.Variable(0.)
     tf.summary.scalar("Distance", distance)
     total_loss = tf.Variable(0.)
     control_loss = tf.Variable(0.)
     depth_loss = tf.Variable(0.)
-    tf.summary.scalar("Total_loss", total_loss)
-    tf.summary.scalar("Control_loss", control_loss)
-    tf.summary.scalar("Depth_loss", depth_loss)
+    tf.summary.scalar("Loss_total", total_loss)
+    tf.summary.scalar("Loss_control", control_loss)
+    tf.summary.scalar("Loss_depth", depth_loss)
     if FLAGS.save_activations:
       act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
       tf.summary.image("conv_activations", act_images, max_outputs=4)

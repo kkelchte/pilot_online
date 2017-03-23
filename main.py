@@ -119,11 +119,12 @@ def main(_):
   writer = tf.summary.FileWriter(FLAGS.summary_dir+FLAGS.log_tag, sess.graph)
   
   model = Model(sess, state_dim, action_dim, writer=writer, bound=FLAGS.action_bound)
+  #model = None
   
   if FLAGS.launch_ros:
     rosinterface.launch()
   rosnode = rosinterface.PilotNode(model, FLAGS.summary_dir+FLAGS.log_tag)
-    
+  
   #def kill_callback(msg):
     #global rosnode
     #print("MAIN: dereferenced rosnode")
@@ -140,19 +141,19 @@ def main(_):
 
   # Random input from tensorflow (could be placeholder)
   
-  ##for i in range(10):
-  #inpt, trgt, dtrgt = sess.run([inputs, targets, depth_targets])
+  #for i in range(10):
+    #inpt, trgt, dtrgt = sess.run([inputs, targets, depth_targets])
     ##print('input: ', inpt,' trgt: ',trgt,'dtrgt:', dtrgt)
     ##action = model.forward(inpt)
     ##print('fw: output: ', action)
-  #res = model.backward(inpt, trgt, dtrgt)
+    #res = model.backward(inpt, trgt, dtrgt)
+    #model.summarize([0,0,res[1][0],res[1][1],res[1][2]])
+  ##import pdb; pdb.set_trace()
     ##print('bw: {0}'.format(res))
     ##action, loss, depth_action, depth_loss, total, dtotal = model.backward(inpt, trgt, dtrgt)
     ##print('bw: output: {0} loss: {1} \n depth output: {2} depth loss: {3} \n total loss {4} total loss depth {5}'.format(action, loss, depth_action, depth_loss, total, dtotal))
-  #import pdb; pdb.set_trace()
+    
    
-    #model.summarize(i, [loss, 10])
-  #
   
   def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')

@@ -39,6 +39,9 @@ tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for
 tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
+tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
+tf.app.flags.DEFINE_float("epsilon", 0., "Epsilon is the probability that the control is picked randomly.")
+tf.app.flags.DEFINE_float("alpha", 0., "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 # =================================================
 
 launch_popen=None
@@ -108,6 +111,7 @@ class PilotNode(object):
     self.ready=False 
     self.finished=True
     self.target_control = None
+    self.target_depth = None
     rospy.init_node('pilot', anonymous=True)
     self.delay_evaluation = 0
     if rospy.has_param('delay_evaluation'):
@@ -120,10 +124,11 @@ class PilotNode(object):
     else: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
-      if not FLAGS.depth_input:
-        rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
-      else:
+      
+      if FLAGS.depth_input or FLAGS.auxiliary_depth:
         rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
+      if not FLAGS.depth_input:        
+        rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
       self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
       rospy.Subscriber('/ready', Empty, self.ready_callback)
       rospy.Subscriber('/finished', Empty, self.finished_callback)
@@ -131,6 +136,8 @@ class PilotNode(object):
       #rospy.Subscriber('/ardrone/overtake', Empty, self.overtake_callback)
       rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
       rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
+    #if FLAGS.evaluate and FLAGS.save_activations: 
+      #raise Exception('Cant evaluate and save activations in current implementation.')
       
   def overtake_callback(self, data):
     if self.ready:
@@ -195,35 +202,51 @@ class PilotNode(object):
       arr_clean = np.array(arr_clean)
       arr_clean = arr_clean*1/5.-0.5
       #print(arr_clean)
+    if FLAGS.depth_input:
       self.process_input(arr_clean)
-      
-      
+    if FLAGS.auxiliary_depth:
+      self.target_depth = arr_clean #(64,) 
     
   def process_input(self, im):
-    #print(im.shape)
-    if self.target_control and not FLAGS.evaluate: 
+    if self.target_control: 
       trgt = self.target_control[5]
+      trgt_depth = None
+      if self.target_depth != None:
+        trgt_depth = self.target_depth[:]
       if FLAGS.experience_replay:
         # add the experience to the replay buffer
-        self.replay_buffer.add(im,[trgt])
+        # shape target control (1)
+        if FLAGS.auxiliary_depth:
+          self.replay_buffer.add(im,[trgt],[trgt_depth])
+        else:
+          self.replay_buffer.add(im,[trgt])
         control = self.model.forward([im])
       if not FLAGS.experience_replay:
-        control, loss = self.model.backward([im],[[trgt]])
+        if FLAGS.auxiliary_depth:
+          control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
+        else:
+          control, losses = self.model.backward([im],[[trgt]])
         print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
-        self.accumloss += loss
+        self.accumloss += losses[0]
     else:
       control = self.model.forward([im])
-    if self.last_position:
+    if self.last_position and self.ready:
       self.runfile = open(self.logfolder+'/runs.txt', 'a')
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
       self.runfile.close()
+    yaw = control[0,0]
+    if np.random.binomial(1,FLAGS.epsilon):
+      yaw = max(-1,min(1,np.random.normal()))
     msg = Twist()
-    msg.linear.x = 0.8
-    msg.angular.z = control[0,0]
+    msg.linear.x = 1.8
+    msg.linear.y = np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
+    msg.linear.z = np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
+    msg.angular.z = yaw
     self.action_pub.publish(msg)
   
   def supervised_callback(self, data):
     if not self.ready: return
+    if FLAGS.reloaded_by_ros and self.run<=3: return
     else:
       self.target_control = [data.linear.x,
         data.linear.y,
@@ -250,11 +273,17 @@ class PilotNode(object):
           #im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
           batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
+          if b==0 and FLAGS.save_activations:
+            activation_images= self.model.plot_activations(batch[0])
           if FLAGS.evaluate:
-            controls, loss = self.model.forward(batch[0],batch[1])
+            # shape control (16,1)
+            controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
             losses = [loss, 0, 0]
           else:
-            controls, losses = self.model.backward(batch[0],batch[1])
+            if FLAGS.auxiliary_depth:
+              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,1,1,64))
+            else:
+              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1))
             if len(losses) == 2: losses.append(0) #in case there is no depth
           tloss.append(losses[0])
           closs.append(losses[1])
@@ -263,15 +292,14 @@ class PilotNode(object):
         closs = np.mean(closs)
         dloss = np.mean(dloss)
         #batch_loss = np.mean(tot_batch_loss)
-        if FLAGS.save_activations:
-          activation_images= self.model.plot_activations(im_b)
+        
       else:
         print('filling buffer or no experience_replay: ', self.replay_buffer.size())
         tloss = 0
         closs = 0
         dloss = 0
       try:
-        if FLAGS.save_activations:
+        if FLAGS.save_activations and activation_images!=None:
           sumvar=[self.accumloss, self.distance, tloss, closs, dloss, activation_images]
         else:
           sumvar=[self.accumloss, self.distance, tloss, closs, dloss]
@@ -284,6 +312,7 @@ class PilotNode(object):
       self.accumloss = 0
       self.maxy = -10
       self.distance = 0
+      self.last_position = None
       
       if self.run%20==0 and not FLAGS.evaluate:
         # Save a checkpoint every 100 runs.
@@ -296,6 +325,3 @@ class PilotNode(object):
         #print('gzserver: ',gzservercount)
         gzservercount = os.popen("ps -Af").read().count('gzserver')
         time.sleep(0.1)
-      
-
-  
