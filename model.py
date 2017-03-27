@@ -82,7 +82,7 @@ class Model(object):
       else:
         checkpoint_path = FLAGS.checkpoint_path
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
-      
+    # self.global_step = tf.Variable(0, name='global_step', trainable=False)  
     # Add the loss function to the graph.
     self.define_loss()
         
@@ -92,6 +92,8 @@ class Model(object):
       
       # Define the training op based on the total loss
       self.define_train()
+    
+    
     
     # Define summaries
     self.build_summaries()
@@ -116,13 +118,13 @@ class Model(object):
         with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=True)  
+          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
       else: #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
-          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob)
+          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
             
@@ -142,8 +144,8 @@ class Model(object):
     '''
     with tf.device(self.device):
       # Specify the optimizer and create the train op:  
-      self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
-      #self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
+      # self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
+      self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
       if FLAGS.grad_mul:
@@ -254,6 +256,3 @@ class Model(object):
       summary_str = self.sess.run(self.summary_ops, feed_dict=feed_dict)
       self.writer.add_summary(summary_str,  tf.train.global_step(self.sess, self.global_step))
       self.writer.flush()
-    
-  
-  

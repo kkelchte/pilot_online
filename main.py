@@ -120,7 +120,6 @@ def main(_):
   
   model = Model(sess, state_dim, action_dim, writer=writer, bound=FLAGS.action_bound)
   #model = None
-  
   if FLAGS.launch_ros:
     rosinterface.launch()
   rosnode = rosinterface.PilotNode(model, FLAGS.summary_dir+FLAGS.log_tag)

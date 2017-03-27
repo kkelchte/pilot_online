@@ -21,9 +21,9 @@ class ReplayBuffer(object):
         self.count = 0
         self.buffer = []
         
-        #self.buffer = deque()
-        #random.seed(random_seed)
-        np.random.seed(random_seed)
+        self.buffer = deque()
+        random.seed(random_seed)
+        # np.random.seed(random_seed)
 
     def add(self, state, target, aux_target=None):
         experience = (state, target)
@@ -33,8 +33,8 @@ class ReplayBuffer(object):
             self.buffer.append(experience)
             self.count += 1
         else:
-            #self.buffer.popleft()
-            self.buffer.pop(0)
+            self.buffer.popleft()
+            # self.buffer.pop(0)
             self.buffer.append(experience)
 
     def size(self):
@@ -48,20 +48,19 @@ class ReplayBuffer(object):
         #batch = []
         if self.count < batch_size:
           # Add different distribution: exponentially/gaussian decaying over time.
-          #batch = random.sample(self.buffer, self.count)
-          if FLAGS.weight_replay:
-            inds = np.random.choice(range(self.count), self.count, p=list(self.softmax(2.5*np.log(range(1,1+self.count)))))
-          else:
-            inds = np.random.choice(range(self.count), self.count)
+          batch = random.sample(self.buffer, self.count)
+          # if FLAGS.weight_replay:
+          #   inds = np.random.choice(range(self.count), self.count, p=list(self.softmax(2.5*np.log(range(1,1+self.count)))))
+          # else:
+          #   inds = np.random.choice(range(self.count), self.count)
         else:
-          #batch = random.sample(self.buffer, batch_size)
-          if FLAGS.weight_replay:
-            inds = np.random.choice(range(batch_size), batch_size, p=list(self.softmax(2.5*np.log(range(1,1+batch_size)))))
-          else:
-            inds = np.random.choice(range(batch_size), batch_size)
-            
+          batch = random.sample(self.buffer, batch_size)
+          # if FLAGS.weight_replay:
+          #   inds = np.random.choice(range(batch_size), batch_size, p=list(self.softmax(2.5*np.log(range(1,1+batch_size)))))
+          # else:
+          #   inds = np.random.choice(range(batch_size), batch_size)
+        # batch = [ self.buffer[i] for i in inds]
         
-        batch = [ self.buffer[i] for i in inds]
         state_batch = np.array([_[0] for _ in batch])
         target_batch = np.array([_[1] for _ in batch])
         aux_batch = None
@@ -71,5 +70,5 @@ class ReplayBuffer(object):
         return state_batch, target_batch, aux_batch
 
     def clear(self):
-        #self.deque.clear()
+        self.deque.clear()
         self.count = 0

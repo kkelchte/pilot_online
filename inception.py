@@ -487,7 +487,7 @@ def inception_v3(inputs,
           net = slim.avg_pool2d(net, kernel_size, padding='VALID',
                               scope='AvgPool_1a_{}x{}'.format(*kernel_size))
           # 1 x 1 x 2048
-          aux_logits = slim.fully_connected(net, 100, activation_fn=tf.nn.relu, scope='layer1_depth_aux')
+          net = slim.fully_connected(net, 100, activation_fn=tf.nn.relu, scope='layer1_depth_aux')
           # 1 x 1 x 100
           aux_logits = slim.fully_connected(net, 64, activation_fn=tf.nn.relu, scope='layer2_depth_aux')
           #aux_logits = tf.squeeze(aux_logits)
@@ -525,6 +525,7 @@ def inception_v3(inputs,
                              #normalizer_fn=None, scope='Conv2d_1c_1x1')
         #logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=tf.tanh,
                              #normalizer_fn=None, scope='Conv2d_1c_1x1')
+        net = slim.fully_connected(net, 100, activation_fn=tf.nn.relu, scope='hidden_control')
         logits = slim.fully_connected(net, num_classes, activation_fn=tf.tanh, scope='final_tanh')
         if spatial_squeeze:
           logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')

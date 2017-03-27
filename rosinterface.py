@@ -33,7 +33,7 @@ tf.app.flags.DEFINE_string("rundir", 'runs', "Choose location to keep the trajec
 tf.app.flags.DEFINE_integer("num_flights", 1000, "the maximum number of tries.")
 tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being learned.")
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
-tf.app.flags.DEFINE_integer("buffer_size", 100, "Define the number of experiences saved in the buffer.")
+tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
 tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
