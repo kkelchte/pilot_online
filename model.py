@@ -72,8 +72,8 @@ class Model(object):
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
       
-      # list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
-      list_to_exclude.extend(["InceptionV3/AuxLogits"])
+      list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      # list_to_exclude.extend(["InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
@@ -164,7 +164,8 @@ class Model(object):
         control_variables = [v for v in global_variables if v.name.find('Logits')!=-1]        
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables)
       else:
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+        #self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+        self.train_op = slim.learning.create_train_op(self.depth_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
 
   def forward(self, inputs, targets=None):
     '''run forward pass and return action prediction

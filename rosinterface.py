@@ -43,6 +43,7 @@ tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones fi
 tf.app.flags.DEFINE_float("epsilon", 0., "Epsilon is the probability that the control is picked randomly.")
 tf.app.flags.DEFINE_float("alpha", 0., "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 tf.app.flags.DEFINE_float("speed", 0.8, "Define the forward speed of the quadrotor.")
+tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 # =================================================
 
 launch_popen=None
@@ -130,13 +131,19 @@ class PilotNode(object):
         rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
       if not FLAGS.depth_input:        
         rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
-      self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+      if FLAGS.off_policy:
+        self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
+      else:
+        self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
       rospy.Subscriber('/ready', Empty, self.ready_callback)
       rospy.Subscriber('/finished', Empty, self.finished_callback)
       #rospy.Subscriber('/finished', Empty, self.overtake_callback)
       #rospy.Subscriber('/ardrone/overtake', Empty, self.overtake_callback)
       rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
-      rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
+      if FLAGS.off_policy:
+        rospy.Subscriber('/cmd_vel', Twist, self.supervised_callback)
+      else:
+        rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
     #if FLAGS.evaluate and FLAGS.save_activations: 
       #raise Exception('Cant evaluate and save activations in current implementation.')
       
