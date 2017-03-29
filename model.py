@@ -23,8 +23,9 @@ tf.app.flags.DEFINE_string("model_path", 'inception', "Specify where the Model, 
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint (including last logit and auxlogit layers) or from a pretrained model (without last logit layers).")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
+tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
 tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
@@ -71,7 +72,8 @@ class Model(object):
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
       
-      list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      # list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      list_to_exclude.extend(["InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
@@ -104,6 +106,7 @@ class Model(object):
       self.sess.run([init_assign_op], init_feed_dict)
       #self.sess.run([init_all,init_assign_op], init_feed_dict)
       print('Successfully loaded model:',checkpoint_path)
+    # import pdb; pdb.set_trace()
     
   def define_network(self):
     '''build the network and set the tensors
@@ -148,6 +151,7 @@ class Model(object):
       self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
+      # import pdb; pdb.set_trace()
       if FLAGS.grad_mul:
         gradient_multipliers = {
           'InceptionV3/Logits/final_tanh/weights/read:0': 10,
@@ -155,8 +159,13 @@ class Model(object):
         }
       else:
         gradient_multipliers = {}
-      self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers, global_step=self.global_step)
-        
+      if FLAGS.freeze:
+        global_variables = [v for v in tf.global_variables() if (v.name.find('Adadelta')==-1 and v.name.find('BatchNorm')==-1)]
+        control_variables = [v for v in global_variables if v.name.find('Logits')!=-1]        
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables)
+      else:
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+
   def forward(self, inputs, targets=None):
     '''run forward pass and return action prediction
     '''

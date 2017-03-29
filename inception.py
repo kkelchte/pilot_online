@@ -484,32 +484,12 @@ def inception_v3(inputs,
         aux_logits = end_points['Mixed_6e']
         with tf.variable_scope('AuxLogits'):
           kernel_size = _reduced_kernel_size_for_small_input(net, [8, 8])
-          net = slim.avg_pool2d(net, kernel_size, padding='VALID',
+          aux_logits = slim.avg_pool2d(net, kernel_size, padding='VALID',
                               scope='AvgPool_1a_{}x{}'.format(*kernel_size))
           # 1 x 1 x 2048
-          net = slim.fully_connected(net, 100, activation_fn=tf.nn.relu, scope='layer1_depth_aux')
+          aux_logits = slim.fully_connected(aux_logits, 100, activation_fn=tf.nn.relu, scope='layer1_depth_aux')
           # 1 x 1 x 100
-          aux_logits = slim.fully_connected(net, 64, activation_fn=tf.nn.relu, scope='layer2_depth_aux')
-          #aux_logits = tf.squeeze(aux_logits)
-          #aux_logits = slim.avg_pool2d(
-              #aux_logits, [5, 5], stride=3, padding='VALID',
-              #scope='AvgPool_1a_5x5')
-          #aux_logits = slim.conv2d(aux_logits, depth(128), [1, 1],
-                                   #scope='Conv2d_1b_1x1')
-
-          # Shape of feature map before the final layer.
-          #kernel_size = _reduced_kernel_size_for_small_input(
-              #aux_logits, [5, 5])
-          #aux_logits = slim.conv2d(
-              #aux_logits, depth(768), kernel_size,
-              #weights_initializer=trunc_normal(0.01),
-              #padding='VALID', scope='Conv2d_2a_{}x{}'.format(*kernel_size))
-          #aux_logits = slim.conv2d(
-              #aux_logits, num_classes, [1, 1], activation_fn=None,
-              #normalizer_fn=None, weights_initializer=trunc_normal(0.001),
-              #scope='Conv2d_2b_1x1')
-          #if spatial_squeeze:
-          #  aux_logits = tf.squeeze(aux_logits, [1, 2], name='SpatialSqueeze')
+          aux_logits = slim.fully_connected(aux_logits, 64, activation_fn=tf.nn.relu, scope='layer2_depth_aux')
           end_points['AuxLogits'] = aux_logits
 
       # Final pooling and prediction

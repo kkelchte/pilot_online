@@ -42,6 +42,7 @@ tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RG
 tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
 tf.app.flags.DEFINE_float("epsilon", 0., "Epsilon is the probability that the control is picked randomly.")
 tf.app.flags.DEFINE_float("alpha", 0., "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
+tf.app.flags.DEFINE_float("speed", 0.8, "Define the forward speed of the quadrotor.")
 # =================================================
 
 launch_popen=None
@@ -238,7 +239,7 @@ class PilotNode(object):
     if np.random.binomial(1,FLAGS.epsilon):
       yaw = max(-1,min(1,np.random.normal()))
     msg = Twist()
-    msg.linear.x = 1.8
+    msg.linear.x = FLAGS.speed #0.8 # 1.8 #
     msg.linear.y = np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.linear.z = np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.angular.z = yaw
