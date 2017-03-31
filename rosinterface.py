@@ -22,6 +22,8 @@ from model import Model
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Empty
+from rospy.numpy_msg import numpy_msg
+from rospy_tutorials.msg import Floats
 from nav_msgs.msg import Odometry
 
 #from PIL import Image
@@ -44,6 +46,7 @@ tf.app.flags.DEFINE_float("epsilon", 0., "Epsilon is the probability that the co
 tf.app.flags.DEFINE_float("alpha", 0., "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 tf.app.flags.DEFINE_float("speed", 0.8, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
+tf.app.flags.DEFINE_boolean("show_depth",True,"Publish the predicted depth to a topic so show_depth can visualize this in another node.")
 # =================================================
 
 launch_popen=None
@@ -114,6 +117,7 @@ class PilotNode(object):
     self.finished=True
     self.target_control = None
     self.target_depth = None
+    self.aux_depth = None
     rospy.init_node('pilot', anonymous=True)
     self.delay_evaluation = 0
     if rospy.has_param('delay_evaluation'):
@@ -126,9 +130,10 @@ class PilotNode(object):
     else: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
-      
       if FLAGS.depth_input or FLAGS.auxiliary_depth:
         rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
+      if FLAGS.show_depth and FLAGS.auxiliary_depth:
+        self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
       if not FLAGS.depth_input:        
         rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
       if FLAGS.off_policy:
@@ -213,35 +218,30 @@ class PilotNode(object):
     if FLAGS.depth_input:
       self.process_input(arr_clean)
     if FLAGS.auxiliary_depth:
-      self.target_depth = arr_clean #(64,) 
+      self.target_depth = arr_clean #(64,)
+
     
   def process_input(self, im):
-    if self.target_control: 
+    trgt = -100.
+    if self.target_control == None or FLAGS.evaluate:
+      control, _ = self.model.forward([im])
+    else:
       trgt = self.target_control[5]
       trgt_depth = None
       if self.target_depth != None:
         trgt_depth = self.target_depth[:]
-      if FLAGS.experience_replay:
-        # add the experience to the replay buffer
-        # shape target control (1)
-        if FLAGS.auxiliary_depth:
-          self.replay_buffer.add(im,[trgt],[trgt_depth])
-        else:
-          self.replay_buffer.add(im,[trgt])
-        control = self.model.forward([im])
-      if not FLAGS.experience_replay:
+      # Train online in between each step
+      if not FLAGS.experience_replay: 
         if FLAGS.auxiliary_depth:
           control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
         else:
           control, losses = self.model.backward([im],[[trgt]])
         print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
         self.accumloss += losses[0]
-    else:
-      control = self.model.forward([im])
-    if self.last_position and self.ready:
-      self.runfile = open(self.logfolder+'/runs.txt', 'a')
-      self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-      self.runfile.close()
+      else:
+        # in case the network can predict the depth 
+        control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
+    # import pdb; pdb.set_trace()
     yaw = control[0,0]
     if np.random.binomial(1,FLAGS.epsilon):
       yaw = max(-1,min(1,np.random.normal()))
@@ -251,6 +251,22 @@ class PilotNode(object):
     msg.linear.z = np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.angular.z = yaw
     self.action_pub.publish(msg)
+    
+    if self.aux_depth != None:
+      self.depth_pub.publish(np.squeeze(self.aux_depth))
+      # import pdb; pdb.set_trace()
+    # add the experience to the replay buffer
+    # shape target control (1)
+    if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
+      if FLAGS.auxiliary_depth:
+        self.replay_buffer.add(im,[trgt],[trgt_depth])
+      else:
+        self.replay_buffer.add(im,[trgt])
+
+    if self.last_position and self.ready:
+      self.runfile = open(self.logfolder+'/runs.txt', 'a')
+      self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
+      self.runfile.close()
   
   def supervised_callback(self, data):
     if not self.ready: return

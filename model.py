@@ -164,17 +164,35 @@ class Model(object):
         control_variables = [v for v in global_variables if v.name.find('Logits')!=-1]        
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables)
       else:
-        #self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
-        self.train_op = slim.learning.create_train_op(self.depth_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+        #self.train_op = slim.learning.create_train_op(self.depth_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
 
-  def forward(self, inputs, targets=None):
+  def forward(self, inputs, targets=None, aux=False):
     '''run forward pass and return action prediction
+    inputs: RGB image / depth images as input of the network
+    targets: labels provided means that loss is calculated as well
+    aux: boolean that defines wether auxiliary logit predictions should be returned as well
+
     '''
-    if targets == None:
-      return self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
+    auxdepth = None
+    if aux:
+      if targets == None:
+        # print 'aux True - No Targets'
+        control, auxdepth = self.sess.run([self.outputs, self.auxlogits], feed_dict={self.inputs: inputs})
+        return control, auxdepth
+      else:
+        # print 'aux True - Targets'
+        control, tloss, closs, auxdepth = self.sess.run([self.outputs, self.total_loss, self.loss, self.auxlogits], feed_dict={self.inputs: inputs, self.targets: targets})
+        return control, [tloss, closs], auxdepth
     else:
-      control, tloss, closs = self.sess.run([self.outputs, self.total_loss, self.loss], feed_dict={self.inputs: inputs, self.targets: targets})
-      return control, [tloss, closs]
+      if targets == None:
+        # print 'aux False - No Targets'
+        control =  self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
+        return control, None
+      else:
+        # print 'aux False - Targets'
+        control, tloss, closs = self.sess.run([self.outputs, self.total_loss, self.loss], feed_dict={self.inputs: inputs, self.targets: targets})
+        return control, [tloss, closs]
     
   def backward(self, inputs, targets, depth_targets=None):
     '''run forward pass and return action prediction
