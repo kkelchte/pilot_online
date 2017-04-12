@@ -3,6 +3,7 @@ import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
 import inception
 import fc_control
+import depth_estim
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 
@@ -29,6 +30,7 @@ tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
 tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
+tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 """
 Build basic NN model
 """
@@ -58,7 +60,7 @@ class Model(object):
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
-    if FLAGS.network == 'inception' and not FLAGS.continue_training:
+    if not FLAGS.continue_training:
       if FLAGS.model_path[0]!='/':
         checkpoint_path = '/home/klaas/tensorflow2/log/'+FLAGS.model_path
       else:
@@ -71,8 +73,11 @@ class Model(object):
         list_to_exclude.extend(["InceptionV3/Mixed_6a", "InceptionV3/Mixed_6b", "InceptionV3/Mixed_6c", "InceptionV3/Mixed_6d", "InceptionV3/Mixed_6e"])
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
-      
-      list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      # list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      if FLAGS.network == 'depth':
+        # control layers are not in pretrained depth checkpoint
+        list_to_exclude.extend(['control/control_1/weights','control/control_1/biases','control/control_2/weights','control/control_2/biases'])
+      list_to_exclude.append('global_step')
       # list_to_exclude.extend(["InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
@@ -102,10 +107,14 @@ class Model(object):
     
     init_all=tf_variables.global_variables_initializer()
     self.sess.run([init_all])
-    if FLAGS.network == 'inception' or FLAGS.continue_training:
-      self.sess.run([init_assign_op], init_feed_dict)
-      #self.sess.run([init_all,init_assign_op], init_feed_dict)
-      print('Successfully loaded model:',checkpoint_path)
+    #if FLAGS.network == 'inception' or FLAGS.continue_training:
+    self.sess.run([init_assign_op], init_feed_dict)
+    #self.sess.run([init_all,init_assign_op], init_feed_dict)
+    print('Successfully loaded model:',checkpoint_path)
+    # Some debugging code for checking values of loaded / initialized variables    
+    # var=[v for v in tf.global_variables() if v.name.find('control_1') != -1]
+    # print([v.name for v in var])
+    # print [self.sess.run(var)]
     # import pdb; pdb.set_trace()
     
   def define_network(self):
@@ -121,16 +130,25 @@ class Model(object):
         with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
+          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, 
+            is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
-      else: #in case of fc_control
+      elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)):
-          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
+            is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
-            
+      elif FLAGS.network=='depth':
+        with slim.arg_scope(depth_estim.depth_arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
+          # Define model with SLIM, second returned value are endpoints to get activations of certain nodes
+          self.outputs, self.endpoints = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=True)
+          self.auxlogits = self.endpoints['fully_connected_1']
+      else:
+        raise NameError( '[model] Network is unknown: ', FLAGS.network)
+
   def define_loss(self):
     '''tensor for calculating the loss
     '''
@@ -138,7 +156,8 @@ class Model(object):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       self.loss = losses.mean_squared_error(self.outputs, self.targets)
       if FLAGS.auxiliary_depth:
-        self.depth_targets = tf.placeholder(tf.float32, [None,1,1, 64])
+        # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
+        self.depth_targets = tf.placeholder(tf.float32, [None,55*74])
         self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets)
       self.total_loss = losses.get_total_loss()
       
@@ -161,10 +180,11 @@ class Model(object):
         gradient_multipliers = {}
       if FLAGS.freeze:
         global_variables = [v for v in tf.global_variables() if (v.name.find('Adadelta')==-1 and v.name.find('BatchNorm')==-1)]
-        control_variables = [v for v in global_variables if v.name.find('Logits')!=-1]        
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables)
+        control_variables = [v for v in global_variables if v.name.find('control')!=-1]   # changed logits to control
+        print('Only training control variables: ',[v.name for v in control_variables])      
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables, clip_gradient_norm=FLAGS.clip_grad)
       else:
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
         #self.train_op = slim.learning.create_train_op(self.depth_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
 
   def forward(self, inputs, targets=None, aux=False):

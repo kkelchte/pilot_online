@@ -494,18 +494,18 @@ def inception_v3(inputs,
 
       # Final pooling and prediction
       with tf.variable_scope('Logits'):
-        #FEATURES ONLY kernel_size = _reduced_kernel_size_for_small_input(net, [8, 8])
-        #FEATURES ONLY net = slim.avg_pool2d(net, kernel_size, padding='VALID',
-                       #FEATURES ONLY       scope='AvgPool_1a_{}x{}'.format(*kernel_size))
+        kernel_size = _reduced_kernel_size_for_small_input(net, [8, 8])
+        net = slim.avg_pool2d(net, kernel_size, padding='VALID',
+                              scope='AvgPool_1a_{}x{}'.format(*kernel_size))
         # 1 x 1 x 2048
-        #FEATURES ONLYnet = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
-        #FEATURES ONLYend_points['PreLogits'] = net
+        net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
+        end_points['PreLogits'] = net
         # 2048
         #logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
                              #normalizer_fn=None, scope='Conv2d_1c_1x1')
         #logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=tf.tanh,
                              #normalizer_fn=None, scope='Conv2d_1c_1x1')
-        net = slim.fully_connected(aux_logits, 100, activation_fn=tf.nn.relu, scope='hidden_control')
+        net = slim.fully_connected(net, 100, activation_fn=tf.nn.relu, scope='hidden_control')
         logits = slim.fully_connected(net, num_classes, activation_fn=tf.tanh, scope='final_tanh')
         if spatial_squeeze:
           logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
@@ -579,10 +579,10 @@ def inception_v3_arg_scope(weight_decay=0.00004,
 
   # Set weight_decay for weights in Conv and FC layers.
   with slim.arg_scope([slim.conv2d, slim.fully_connected],
+                      weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
                       weights_regularizer=slim.l2_regularizer(weight_decay)):
     with slim.arg_scope(
         [slim.conv2d],
-        weights_initializer=tf.truncated_normal_initializer(stddev=stddev),
         activation_fn=tf.nn.relu,
         normalizer_fn=slim.batch_norm,
         normalizer_params=batch_norm_params) as sc:

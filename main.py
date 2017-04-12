@@ -21,6 +21,7 @@ import rosinterface
 #models:
 import inception
 import fc_control
+import depth_estim
 
 import sys, os, os.path
 import subprocess
@@ -55,7 +56,7 @@ tf.app.flags.DEFINE_float("action_bound", 1.0, "Define between what bounds the a
 tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacting with the real (bebop) drone.")
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
-tf.app.flags.DEFINE_string("network", 'inception', "Define the type of network: inception / fc_control.")
+tf.app.flags.DEFINE_string("network", 'inception', "Define the type of network: inception / fc_control / depth.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
 
 # ===========================
@@ -98,6 +99,8 @@ def main(_):
     state_dim = [1, inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
   elif FLAGS.network == 'fc_control':
     state_dim = [1, fc_control.fc_control_v1.input_size]
+  elif FLAGS.network =='depth':
+    state_dim = depth_estim.depth_estim_v1.input_size
   else:
     raise NameError( 'Network is unknown: ', FLAGS.network)
   
@@ -114,7 +117,7 @@ def main(_):
   
   
   config=tf.ConfigProto(allow_soft_placement=True)
-  config.gpu_options.allow_growth = False #True Adjusted as during evaluation it takes too long to load a model
+  config.gpu_options.allow_growth = True
   sess = tf.Session(config=config)
   writer = tf.summary.FileWriter(FLAGS.summary_dir+FLAGS.log_tag, sess.graph)
   
