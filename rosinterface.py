@@ -224,9 +224,9 @@ class PilotNode(object):
       # arr_clean = np.array(arr_clean)
       # arr_clean = arr_clean*1/5.-0.5
       # Go from float to normal image: 
-      # fix nans
-      shp = im.shape
-      im=np.asarray([ e*1.0 if not np.isnan(e) else 5. for e in im.flatten()]).reshape(shp)
+      # fix nans --> takes a lot of time so better not do this...
+      # shp = im.shape
+      # im=np.asarray([ e*1.0 if not np.isnan(e) else 5. for e in im.flatten()]).reshape(shp)
       
       # range [0,5] to [0,1] for resizing
       im=im*1/5.
