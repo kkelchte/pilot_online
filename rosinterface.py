@@ -42,8 +42,8 @@ tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being l
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
 tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
-tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
-tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
+tf.app.flags.DEFINE_float("mean", 0., "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
+tf.app.flags.DEFINE_float("std", 1., "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
 tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
@@ -201,10 +201,10 @@ class PilotNode(object):
       elif FLAGS.network == 'depth':
         size = depth_estim.depth_estim_v1.input_size[1:]
       im = sm.imresize(cv2_img,tuple(size),'nearest')
-      im = im*1/255.
+      # im = im*1/255.
       # Basic preprocessing: center + make 1 standard deviation
-      im -= FLAGS.mean
-      im = im*1/FLAGS.std
+      # im -= FLAGS.mean
+      # im = im*1/FLAGS.std
       self.process_input(im)
 
   def depth_image_callback(self, data):
@@ -216,30 +216,13 @@ class PilotNode(object):
     except CvBridgeError as e:
       print(e)
     else:
-      # crop image to get 1 line in the middle
-      # row = int(im.shape[0]/2.)
-      # step_colums = int(im.shape[1]/64.)
-      # arr = im[row, ::step_colums]
-      # arr_clean = [e if not np.isnan(e) else 5 for e in arr]
-      # arr_clean = np.array(arr_clean)
-      # arr_clean = arr_clean*1/5.-0.5
-      # Go from float to normal image: 
-      # fix nans --> takes a lot of time so better not do this...
-      # shp = im.shape
-      # im=np.asarray([ e*1.0 if not np.isnan(e) else 5. for e in im.flatten()]).reshape(shp)
-      
-      # range [0,5] to [0,1] for resizing
-      im=im*1/5.
-      # Resize image in float
+      shp=im.shape
+      im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp)
+      # Resize image
       im=sm.imresize(im,(55,74),'nearest')
-      #cv2.imshow('target depth rosinterface',im)
-      #cv2.waitKey(1)
-      # check the values
-      # if np.amin(im)==0 or np.amax(im)==0.: return
-      # scale back to [-0.5,0.5]
-      # im=im*1/255.*5.
-      # print(np.amin(im), '<- min max -> ', np.amax(im))
-      
+      cv2.imshow('depth', im)
+      cv2.waitKey(2)
+      im = im *1/255.*5.
     if FLAGS.depth_input:
       self.process_input(im)
     if FLAGS.auxiliary_depth:
@@ -286,9 +269,12 @@ class PilotNode(object):
     msg.angular.z = yaw
     self.action_pub.publish(msg)
     
-    if FLAGS.show_depth and self.aux_depth != None :
-      self.depth_pub.publish(np.squeeze(self.aux_depth))
-      # import pdb; pdb.set_trace()
+    # if FLAGS.show_depth and self.aux_depth != None :
+    #   # self.aux_depth = self.aux_depth.flatten()
+    #   self.ready=False
+    #   import pdb; pdb.set_trace
+    #   self.depth_pub.publish(self.aux_depth)
+    #   # import pdb; pdb.set_trace()
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
       if FLAGS.auxiliary_depth:
@@ -329,8 +315,11 @@ class PilotNode(object):
           #im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
           batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
-          if b==0 and FLAGS.save_activations:
-            activation_images= self.model.plot_activations(batch[0])
+          if b==0:
+            if FLAGS.save_activations:
+              activation_images= self.model.plot_activations(batch[0])
+            if FLAGS.plot_depth and FLAGS.auxiliary_depth:
+              depth_predictions = self.model.plot_depth(batch[0], batch[2][:].reshape(-1,55,74))
           if FLAGS.evaluate:
             # shape control (16,1)
             controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
@@ -339,7 +328,7 @@ class PilotNode(object):
             if FLAGS.auxiliary_depth:
               # controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,1,1,64))
               # import pdb; pdb.set_trace()
-              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,74*55))
+              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,55,74))
             else:
               controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1))
             if len(losses) == 2: losses.append(0) #in case there is no depth
@@ -357,10 +346,11 @@ class PilotNode(object):
         closs = 0
         dloss = 0
       try:
+        sumvar = [self.accumloss, self.distance, tloss, closs, dloss]
         if FLAGS.save_activations and activation_images!=None:
-          sumvar=[self.accumloss, self.distance, tloss, closs, dloss, activation_images]
-        else:
-          sumvar=[self.accumloss, self.distance, tloss, closs, dloss]
+          sumvar.append(activation_images)
+        if FLAGS.plot_depth and FLAGS.auxiliary_depth:
+          sumvar.append(depth_predictions)
         self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)

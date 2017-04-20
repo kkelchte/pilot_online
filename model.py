@@ -18,9 +18,9 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception ne
 # Std of uniform initialization
 tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 # Base learning rate
-tf.app.flags.DEFINE_float("learning_rate", 0.001, "Start learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Start learning rate.")
 # Specify where the Model, trained on ImageNet, was saved.
-tf.app.flags.DEFINE_string("model_path", 'inception', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
+tf.app.flags.DEFINE_string("model_path", 'pretrained_depth', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/models/2017-02-15_1923_test/', "Specify the directory of the checkpoint of the earlier trained model.")
@@ -81,6 +81,35 @@ class Model(object):
       # list_to_exclude.extend(["InceptionV3/AuxLogits"])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
+      if FLAGS.network == 'depth':
+        variables_to_restore = {
+          'Conv/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv/weights'),
+          'Conv/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv/biases'),
+          'NormMaxRelu1/beta':slim.get_unique_variable('Depth_Estimate_V1/batchnorm1/beta'),
+          'NormMaxRelu1/moving_mean':slim.get_unique_variable('Depth_Estimate_V1/batchnorm1/moving_mean'),
+          'NormMaxRelu1/moving_variance':slim.get_unique_variable('Depth_Estimate_V1/batchnorm1/moving_variance'),
+          'Conv_1/weights': slim.get_unique_variable('Depth_Estimate_V1/Conv_1/weights'),
+          'Conv_1/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv_1/biases'),
+          'NormMaxRelu2/beta':slim.get_unique_variable('Depth_Estimate_V1/batchnorm2/beta'),
+          'NormMaxRelu2/moving_mean':slim.get_unique_variable('Depth_Estimate_V1/batchnorm2/moving_mean'),
+          'NormMaxRelu2/moving_variance':slim.get_unique_variable('Depth_Estimate_V1/batchnorm2/moving_variance'),
+          'Conv_2/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv_2/weights'),
+          'Conv_2/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv_2/biases'),
+          'NormRelu1/beta':slim.get_unique_variable('Depth_Estimate_V1/batchnorm3/beta'),
+          'NormRelu1/moving_mean':slim.get_unique_variable('Depth_Estimate_V1/batchnorm3/moving_mean'),
+          'NormRelu1/moving_variance':slim.get_unique_variable('Depth_Estimate_V1/batchnorm3/moving_variance'),
+          'Conv_3/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv_3/weights'),
+          'Conv_3/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv_3/biases'),
+          'NormRelu2/beta':slim.get_unique_variable('Depth_Estimate_V1/batchnorm4/beta'),
+          'NormRelu2/moving_mean':slim.get_unique_variable('Depth_Estimate_V1/batchnorm4/moving_mean'),
+          'NormRelu2/moving_variance':slim.get_unique_variable('Depth_Estimate_V1/batchnorm4/moving_variance'),
+          'Conv_4/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv_4/weights'),
+          'Conv_4/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv_4/biases'),
+          'fully_connected/weights':slim.get_unique_variable('Depth_Estimate_V1/fully_connected/weights'),
+          'fully_connected/biases':slim.get_unique_variable('Depth_Estimate_V1/fully_connected/biases'),
+          'fully_connected_1/weights':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/weights'),
+          'fully_connected_1/biases':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/biases')
+          }
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     if FLAGS.continue_training:
       variables_to_restore = slim.get_variables_to_restore()
@@ -142,10 +171,13 @@ class Model(object):
           if(self.bound!=1 or self.bound!=0):
             self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
       elif FLAGS.network=='depth':
-        with slim.arg_scope(depth_estim.depth_arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
+         with slim.arg_scope(depth_estim.arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
           # Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=True)
           self.auxlogits = self.endpoints['fully_connected_1']
+          self.controls, _ = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
+          self.pred_depth = _['fully_connected_1']
+          
       else:
         raise NameError( '[model] Network is unknown: ', FLAGS.network)
 
@@ -157,8 +189,11 @@ class Model(object):
       self.loss = losses.mean_squared_error(self.outputs, self.targets)
       if FLAGS.auxiliary_depth:
         # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
-        self.depth_targets = tf.placeholder(tf.float32, [None,55*74])
-        self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets)
+        self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
+        self.weights = 0.001*tf.cast(tf.greater(self.depth_targets, 0), tf.float32)
+        # self.weights = 0.001
+        self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets, weights=self.weights)
+        # self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets)
       self.total_loss = losses.get_total_loss()
       
   def define_train(self):
@@ -166,8 +201,11 @@ class Model(object):
     '''
     with tf.device(self.device):
       # Specify the optimizer and create the train op:  
-      # self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
-      self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
+      self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
+      # self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
+      # self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=FLAGS.learning_rate)
+
+      
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
       # import pdb; pdb.set_trace()
@@ -187,7 +225,7 @@ class Model(object):
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
         #self.train_op = slim.learning.create_train_op(self.depth_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers)
 
-  def forward(self, inputs, targets=None, aux=False):
+  def forward(self, inputs, targets=None, aux=False, depth_targets=None):
     '''run forward pass and return action prediction
     inputs: RGB image / depth images as input of the network
     targets: labels provided means that loss is calculated as well
@@ -195,24 +233,29 @@ class Model(object):
 
     '''
     auxdepth = None
-    if aux:
-      if targets == None:
+    if aux: #forward run returning auxiliary predictions (depth, odometry, OF)
+      if targets == None:       
         # print 'aux True - No Targets'
-        control, auxdepth = self.sess.run([self.outputs, self.auxlogits], feed_dict={self.inputs: inputs})
+        control, auxdepth = self.sess.run([self.controls, self.pred_depth], feed_dict={self.inputs: inputs})
         return control, auxdepth
       else:
-        # print 'aux True - Targets'
-        control, tloss, closs, auxdepth = self.sess.run([self.outputs, self.total_loss, self.loss, self.auxlogits], feed_dict={self.inputs: inputs, self.targets: targets})
-        return control, [tloss, closs], auxdepth
+        # ! Variables of batchnormalization are updated in this situation!
+        control, tloss, closs, auxdepth = self.sess.run([self.controls, self.total_loss, self.loss, self.pred_depth], feed_dict={self.inputs: inputs, self.targets: targets})
+        return control, [tloss, closs], auxdepth 
     else:
       if targets == None:
-        # print 'aux False - No Targets'
-        control =  self.sess.run(self.outputs, feed_dict={self.inputs: inputs})
-        return control, None
+        control = self.sess.run(self.controls, feed_dict={self.inputs: inputs})
+        return control, []
       else:
-        # print 'aux False - Targets'
-        control, tloss, closs = self.sess.run([self.outputs, self.total_loss, self.loss], feed_dict={self.inputs: inputs, self.targets: targets})
-        return control, [tloss, closs]
+        # ! Variables of batchnormalization are updated in this situation!
+        if depth_targets != None:
+          control, tloss, closs, dloss = self.sess.run([self.controls, self.total_loss,  self.loss, self.depth_loss], feed_dict={self.inputs: inputs, self.targets: targets, self.depth_targets: depth_targets})
+          losses = [tloss, closs, dloss]
+        # ! Variables of batchnormalization are updated in this situation!
+        else:
+          control, tloss, closs = self.sess.run([self.controls, self.total_loss,  self.loss], feed_dict={self.inputs: inputs, self.targets: targets})
+          losses = [tloss, closs]
+        return control, losses
     
   def backward(self, inputs, targets, depth_targets=None):
     '''run forward pass and return action prediction
@@ -239,7 +282,7 @@ class Model(object):
     
     # canvas.tostring_argb give pixmap in ARGB mode. Roll the ALPHA channel to have it in RGBA mode
     buf = np.roll(buf, 3, axis = 2 )
-    buf = buf[0::1,0::1,0:1] #slice to make image 4x smaller and use only the R channel of RGBA
+    buf = buf[0::1,0::1,0:3] #slice to make image 4x smaller and use only the R channel of RGBA
     #buf = np.resize(buf,(500,500,1))
     return buf
   
@@ -271,30 +314,57 @@ class Model(object):
       #plt.show()
       #import pdb; pdb.set_trace()
     activation_images = np.asarray(activation_images)
-    
     return activation_images
   
+  def plot_depth(self, inputs, depth_targets):
+    '''plot depth predictions and return np array as floating image'''
+    control, depths = self.forward(inputs, aux=True)
+    n=3
+    fig = plt.figure(1, figsize=(5,5))
+    fig.suptitle('depth predictions', fontsize=20)
+    for i in range(n):
+      plt.axis('off') 
+      plt.subplot(n, 3, 1+3*i)
+      plt.imshow(inputs[i])
+      plt.axis('off') 
+      plt.subplot(n, 3, 2+3*i)
+      plt.imshow(depths[i]*1/5.)
+      plt.axis('off') 
+      plt.subplot(n, 3, 3+3*i)
+      plt.imshow(depth_targets[i]*1/5.)
+      plt.axis('off')
+    buf=self.fig2buf(fig)
+    # plt.show()
+    # import pdb; pdb.set_trace()
+    return np.asarray(buf).reshape((1,500,500,3))
+
   def save(self, logfolder):
     '''save a checkpoint'''
     self.saver.save(self.sess, logfolder+'/my-model', global_step=tf.train.global_step(self.sess, self.global_step))
   
   def build_summaries(self): 
+    self.summary_vars = []
     episode_loss = tf.Variable(0.)
     tf.summary.scalar("Episode_loss", episode_loss)
+    self.summary_vars.append(episode_loss)
     distance = tf.Variable(0.)
     tf.summary.scalar("Distance", distance)
+    self.summary_vars.append(distance)
     total_loss = tf.Variable(0.)
     control_loss = tf.Variable(0.)
     depth_loss = tf.Variable(0.)
     tf.summary.scalar("Loss_total", total_loss)
     tf.summary.scalar("Loss_control", control_loss)
     tf.summary.scalar("Loss_depth", depth_loss)
+    self.summary_vars.extend([total_loss,control_loss,depth_loss])
     if FLAGS.save_activations:
       act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
       tf.summary.image("conv_activations", act_images, max_outputs=4)
-      self.summary_vars = [episode_loss, distance, total_loss, control_loss, depth_loss, act_images]
-    else:
-      self.summary_vars = [episode_loss, distance, total_loss, control_loss, depth_loss]
+      self.summary_vars.append(act_images)
+    if FLAGS.auxiliary_depth and FLAGS.plot_depth:
+      dep_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
+      tf.summary.image("depth_predictions", dep_images, max_outputs=4)
+      self.summary_vars.append(dep_images)
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, sumvars):
