@@ -120,8 +120,8 @@ class PilotNode(object):
     self.model = model
     self.ready=False 
     self.finished=True
-    self.target_control = None
-    self.target_depth = None
+    self.target_control = []
+    self.target_depth = []
     self.aux_depth = None
     rospy.init_node('pilot', anonymous=True)
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
@@ -235,17 +235,17 @@ class PilotNode(object):
       control, _ = self.model.forward([im])
     else: ###TRAINING
       # Get necessary labels, if label is missing wait...
-      if self.target_control == None:
+      if len(self.target_control) == 0:
         print('No target control')
         return
       else:
         trgt = self.target_control[5]
-      if FLAGS.auxiliary_depth and self.target_depth == None:
+      if FLAGS.auxiliary_depth and len(self.target_depth) == 0:
         print('No target depth')
         return
       else:
         trgt_depth = self.target_depth[:]
-        self.target_depth = None
+        self.target_depth = []
       if not FLAGS.experience_replay: ### TRAINING WITHOUT EXPERIENCE REPLAY 
         if FLAGS.auxiliary_depth:
           control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
@@ -305,10 +305,12 @@ class PilotNode(object):
       self.finished=True
       # Train model from experience replay:
       # Train the model with batchnormalization out of the image callback loop
-      activation_images = None
+      activation_images = []
+      depth_predictions = []
+    
+      tloss = [] #total loss
       closs = [] #control loss
       dloss = [] #depth loss
-      tloss = [] #total loss
       #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):

@@ -10,6 +10,7 @@ from tensorflow.contrib.layers import batch_norm
 slim = tf.contrib.slim
 
 
+
 def depth_estim_v1(inputs,
                   num_classes=1,
                   is_training=True,
@@ -30,28 +31,32 @@ def depth_estim_v1(inputs,
     with slim.arg_scope([slim.conv2d, slim.max_pool2d, slim.avg_pool2d],
                           stride=1, padding='VALID'):
       depth = lambda d: max(int(d * depth_multiplier), min_depth)
+      
       end_point = 'Conv'
       net = slim.conv2d(inputs, 96, [11,11], stride=4, scope=end_point)
       net = batch_norm(inputs = net, decay = 0.9997, epsilon = 0.001, is_training = is_training, scope = 'batchnorm1')
       net = slim.max_pool2d(net,[2,2],stride=2)
-      # net = tf.nn.relu(net)
       end_points[end_point] = net
+      
       end_point = 'Conv_1'
       net = slim.conv2d(net, 256, [5,5], stride=1, scope=end_point)
       net = batch_norm(inputs = net, decay = 0.9997, epsilon = 0.001, is_training = is_training, scope = 'batchnorm2')
       net = slim.max_pool2d(net,[2,2],stride=2)
       # net = tf.nn.relu(net)
       end_points[end_point] = net
+      
       end_point = 'Conv_2'
       net = slim.conv2d(net, 384, [3,3], stride=1, scope=end_point)
       net = batch_norm(inputs = net, decay = 0.9997, epsilon = 0.001, is_training = is_training, scope = 'batchnorm3')
       # net = tf.nn.relu(net)
       end_points[end_point] = net
+      
       end_point = 'Conv_3'
       net = slim.conv2d(net, 384, [3,3], stride=2, scope=end_point)
       net = batch_norm(inputs = net, decay = 0.9997, epsilon = 0.001, is_training = is_training, scope = 'batchnorm4')
       # net = tf.nn.relu(net)
       end_points[end_point] = net
+      
       end_point = 'Conv_4'
       net = slim.conv2d(net, 256, [3,3], stride=1, scope=end_point)
       end_points[end_point] = net
