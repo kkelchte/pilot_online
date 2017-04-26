@@ -67,6 +67,7 @@ class Model(object):
         checkpoint_path = FLAGS.model_path
         
       list_to_exclude = []
+      list_to_exclude.append('global_step')
       if FLAGS.exclude_from_layer <= 7:
         list_to_exclude.extend(["InceptionV3/Mixed_7a", "InceptionV3/Mixed_7b", "InceptionV3/Mixed_7c"])
       if FLAGS.exclude_from_layer <= 6:
@@ -99,9 +100,7 @@ class Model(object):
       
       # Define the training op based on the total loss
       self.define_train()
-    
-    
-    
+        
     # Define summaries
     self.build_summaries()
     
@@ -123,7 +122,6 @@ class Model(object):
     with tf.device(self.device):
       self.inputs = tf.placeholder(tf.float32, shape = self.input_size)
       if FLAGS.network == 'inception':
-        #inputs = tf.placeholder(tf.float32, shape = [None, 299, 299, 3])
         ### initializer is defined in the arg scope of inception.
         ### need to stick to this arg scope in order to load the inception checkpoint properly...
         ### weights are now initialized uniformly 
@@ -132,11 +130,9 @@ class Model(object):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
-          if(self.bound!=1 or self.bound!=0):
-            self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
-                            stddev=FLAGS.init_scale)):
+                            stddev=FLAGS.init_scale)): 
           self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
           if(self.bound!=1 or self.bound!=0):
@@ -148,6 +144,8 @@ class Model(object):
           self.auxlogits = self.endpoints['fully_connected_1']
       else:
         raise NameError( '[model] Network is unknown: ', FLAGS.network)
+      if(self.bound!=1 or self.bound!=0):
+        self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
 
   def define_loss(self):
     '''tensor for calculating the loss
@@ -157,7 +155,7 @@ class Model(object):
       self.loss = losses.mean_squared_error(self.outputs, self.targets)
       if FLAGS.auxiliary_depth:
         # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
-        self.depth_targets = tf.placeholder(tf.float32, [None,55*74])
+        self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
         self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets)
       self.total_loss = losses.get_total_loss()
       
