@@ -32,7 +32,7 @@ tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the tra
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
-tf.app.flags.DEFINE_boolean("save_activations", False, "Specify whether the activations are weighted.")
+tf.app.flags.DEFINE_boolean("plot_activations", False, "Specify whether the activations are weighted.")
 tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
@@ -43,7 +43,7 @@ Build basic NN model
 """
 class Model(object):
  
-  def __init__(self,  session, input_size, output_size, prefix='model', device='/gpu:0', bound=1, writer=None):
+  def __init__(self,  session, input_size, output_size, prefix='model', device='/gpu:0', bound=1):
     '''initialize model
     '''
     self.sess = session
@@ -53,7 +53,7 @@ class Model(object):
     self.input_size[0] = None
     self.prefix = prefix
     self.device = device
-    self.writer = writer
+    # self.writer = writer
     self.lr = FLAGS.learning_rate 
     #if FLAGS.initializer == 'xavier':
       #self.initializer=tf.contrib.layers.xavier_initializer()
@@ -176,8 +176,6 @@ class Model(object):
           self.pred_depth = _['fully_connected_1']
           if FLAGS.plot_histograms:
             for v in tf.global_variables():
-              # print v.name
-              # import pdb; pdb.set_trace()
               tf.summary.histogram(v.name.split(':')[0], v)
           
       else:
@@ -279,6 +277,14 @@ class Model(object):
     # import pdb; pdb.set_trace()
     return control, losses
 
+  def get_endpoint_activations(self, inputs):
+    '''Run forward through the network for this batch and return all activations
+    of all intermediate endpoints
+    '''
+    tensors = [ self.endpoints[ep] for ep in self.endpoints]
+    activations = self.sess.run(tensors, feed_dict={self.inputs:inputs})
+    return [ a.reshape(-1,1) for a in activations]
+
   def fig2buf(self, fig):
     """
     Convert a plt fig to a numpy buffer
@@ -301,7 +307,14 @@ class Model(object):
   def plot_activations(self, inputs):
     activation_images = []
     tensors = []
-    endpoint_names = ['Conv2d_1a_3x3', 'Conv2d_2a_3x3', 'Conv2d_2b_3x3', 'Conv2d_3b_1x1']
+
+    if FLAGS.network == 'inception':
+      endpoint_names = ['Conv2d_1a_3x3', 'Conv2d_2a_3x3', 'Conv2d_2b_3x3', 'Conv2d_3b_1x1']
+    # elif FLAGS.network == 'depth':
+    #   endpoint_names = ['Conv']
+    else:
+      raise IOError('MODEL: cant plot activations for this network')
+    
     for endpoint in endpoint_names:
       tensors.append(self.endpoints[endpoint])
     units = self.sess.run(tensors, feed_dict={self.inputs:inputs[0:1]})
@@ -356,29 +369,36 @@ class Model(object):
     self.saver.save(self.sess, logfolder+'/my-model', global_step=tf.train.global_step(self.sess, self.global_step))
     #self.saver.save(self.sess, logfolder+'/my-model')
 
+  def add_summary_var(self, name):
+    var_name = tf.Variable(0.)
+    tf.summary.scalar(name, var_name)
+    self.summary_vars.append(var_name)
+  
   def build_summaries(self): 
     self.summary_vars = []
-    episode_loss = tf.Variable(0.)
-    tf.summary.scalar("Episode_loss", episode_loss)
-    self.summary_vars.append(episode_loss)
-    distance = tf.Variable(0.)
-    tf.summary.scalar("Distance", distance)
-    self.summary_vars.append(distance)
-    total_loss = tf.Variable(0.)
-    control_loss = tf.Variable(0.)
-    depth_loss = tf.Variable(0.)
-    tf.summary.scalar("Loss_total", total_loss)
-    tf.summary.scalar("Loss_control", control_loss)
-    tf.summary.scalar("Loss_depth", depth_loss)
-    self.summary_vars.extend([total_loss,control_loss,depth_loss])
-    if FLAGS.save_activations:
+    self.add_summary_var("Episode_loss")
+    self.add_summary_var("Distance")
+    self.add_summary_var("Loss_total")
+    self.add_summary_var("Loss_control")
+    self.add_summary_var("Loss_depth")
+
+    if FLAGS.plot_activations:
       act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
       tf.summary.image("conv_activations", act_images, max_outputs=4)
       self.summary_vars.append(act_images)
+    
     if FLAGS.auxiliary_depth and FLAGS.plot_depth:
       dep_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
       tf.summary.image("depth_predictions", dep_images, max_outputs=4)
       self.summary_vars.append(dep_images)
+
+    activations={}
+    if FLAGS.plot_histograms:
+      for ep in self.endpoints: # add activations to summary
+        activations[ep]=tf.placeholder(tf.float32,[None, 1])
+        tf.summary.histogram('activations_{}'.format(ep), activations[ep])
+        self.summary_vars.append(activations[ep])
+
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, sumvars):

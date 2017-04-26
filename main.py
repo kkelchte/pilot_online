@@ -123,9 +123,9 @@ def main(_):
   config=tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
   config.gpu_options.allow_growth = True
   sess = tf.Session(config=config)
+  model = Model(sess, state_dim, action_dim, bound=FLAGS.action_bound)
   writer = tf.summary.FileWriter(FLAGS.summary_dir+FLAGS.log_tag, sess.graph)
-  
-  model = Model(sess, state_dim, action_dim, writer=writer, bound=FLAGS.action_bound)
+  model.writer = writer
   #model = None
   if FLAGS.launch_ros:
     rosinterface.launch()

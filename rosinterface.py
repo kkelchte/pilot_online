@@ -153,7 +153,7 @@ class PilotNode(object):
         rospy.Subscriber('/cmd_vel', Twist, self.supervised_callback)
       else:
         rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
-    #if FLAGS.evaluate and FLAGS.save_activations: 
+    #if FLAGS.evaluate and FLAGS.plot_activations: 
       #raise Exception('Cant evaluate and save activations in current implementation.')
       
   def overtake_callback(self, data):
@@ -331,7 +331,7 @@ class PilotNode(object):
       # Train the model with batchnormalization out of the image callback loop
       activation_images = []
       depth_predictions = []
-    
+      endpoint_activations = []
       tloss = [] #total loss
       closs = [] #control loss
       dloss = [] #depth loss
@@ -342,10 +342,12 @@ class PilotNode(object):
           batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
           if b==0:
-            if FLAGS.save_activations:
+            if FLAGS.plot_activations:
               activation_images= self.model.plot_activations(batch[0])
             if FLAGS.plot_depth and FLAGS.auxiliary_depth:
               depth_predictions = self.model.plot_depth(batch[0], batch[2][:].reshape(-1,55,74))
+            if FLAGS.plot_histograms:
+              endpoint_activations = self.model.get_endpoint_activations(batch[0])
           # if FLAGS.evaluate:
           #   # shape control (16,1)
           #   controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
@@ -373,10 +375,12 @@ class PilotNode(object):
         dloss = 0
       try:
         sumvar = [self.accumloss, self.distance, tloss, closs, dloss]
-        if FLAGS.save_activations and len(activation_images)==0:
+        if FLAGS.plot_activations and len(activation_images)!=0:
           sumvar.append(activation_images)
         if FLAGS.plot_depth and FLAGS.auxiliary_depth:
           sumvar.append(depth_predictions)
+        if FLAGS.plot_histograms:
+          sumvar.extend(endpoint_activations)
         self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)
