@@ -1,5 +1,5 @@
 import tensorflow as tf
-import tensorflow.contrib.losses as losses
+# import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
 #from tensorflow.contrib.slim.nets import inception
 import inception
@@ -183,7 +183,8 @@ class Model(object):
       else:
         raise NameError( '[model] Network is unknown: ', FLAGS.network)
       if(self.bound!=1 or self.bound!=0):
-        self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
+        # self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
+        self.outputs = tf.multiply(self.outputs, self.bound) # Scale output to -bound to bound
 
   def define_loss(self):
     '''tensor for calculating the loss
@@ -191,15 +192,15 @@ class Model(object):
     with tf.device(self.device):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       # self.loss = losses.mean_squared_error(tf.clip_by_value(self.outputs,1e-10,1.0), self.targets)
-      self.loss = losses.mean_squared_error(self.outputs, self.targets)
+      self.loss = tf.losses.mean_squared_error(self.outputs, self.targets)
       if FLAGS.auxiliary_depth:
         # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
         self.weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32)
         # self.depth_loss = losses.mean_squared_error(tf.clip_by_value(self.auxlogits,1e-10,1.0), tf.clip_by_value(self.depth_targets,1e-10,1.0), weights=self.weights)
-        self.depth_loss = losses.mean_squared_error(self.auxlogits,self.depth_targets,weights=self.weights)
+        self.depth_loss = tf.losses.mean_squared_error(self.auxlogits,self.depth_targets,weights=self.weights)
         # self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets, weights=0.0001)
-      self.total_loss = losses.get_total_loss()
+      self.total_loss = tf.losses.get_total_loss()
       
   def define_train(self):
     '''applying gradients to the weights from normal loss function
