@@ -200,6 +200,8 @@ class Model(object):
         self.optimizer = tf.train.AdamOptimizer(learning_rate=self.lr) 
       elif FLAGS.optimizer == 'adadelta':
         self.optimizer = tf.train.AdadeltaOptimizer(learning_rate=self.lr) 
+      elif FLAGS.optimizer == 'gradientdescent':
+        self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr) 
       else:
         raise IOError('Model: Unknown optimizer.')
       # Create the train_op and scale the gradients by providing a map from variable
