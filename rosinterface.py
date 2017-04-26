@@ -19,6 +19,7 @@ from replay_buffer import ReplayBuffer
 import inception
 import fc_control
 import depth_estim
+import copy 
 
 import tensorflow as tf
 
@@ -42,8 +43,8 @@ tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being l
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
 tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
-tf.app.flags.DEFINE_float("mean", 0.2623, "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
-tf.app.flags.DEFINE_float("std", 0.1565, "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
+tf.app.flags.DEFINE_float("mean", 0., "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
+tf.app.flags.DEFINE_float("std", 1., "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
 tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
@@ -120,8 +121,8 @@ class PilotNode(object):
     self.model = model
     self.ready=False 
     self.finished=True
-    self.target_control = None
-    self.target_depth = None
+    self.target_control = []
+    self.target_depth = []
     self.aux_depth = None
     rospy.init_node('pilot', anonymous=True)
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
@@ -184,14 +185,16 @@ class PilotNode(object):
     #print(self.distance)
   
   def image_callback(self, data):
+    self.time_1 = time.time()
     # if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
     if not self.ready or self.finished: return
     try:
       # Convert your ROS Image message to OpenCV2
-      cv2_img = bridge.imgmsg_to_cv2(data, 'bgr8') 
+      im = bridge.imgmsg_to_cv2(data, 'bgr8') 
     except CvBridgeError as e:
       print(e)
     else:
+      self.time_2 = time.time()
       #print('received image')
       # 360*640*3
       #(rows,cols,channels) = cv2_img.shape
@@ -200,11 +203,11 @@ class PilotNode(object):
         size = [inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
       elif FLAGS.network == 'depth':
         size = depth_estim.depth_estim_v1.input_size[1:]
-      im = sm.imresize(cv2_img,tuple(size),'nearest')
-      im = im*1/255.
+      im = sm.imresize(im,tuple(size),'nearest')
+      # im = im*1/255.
       # Basic preprocessing: center + make 1 standard deviation
-      im -= FLAGS.mean
-      im = im*1/FLAGS.std
+      # im -= FLAGS.mean
+      # im = im*1/FLAGS.std
       self.process_input(im)
 
   def depth_image_callback(self, data):
@@ -216,53 +219,43 @@ class PilotNode(object):
     except CvBridgeError as e:
       print(e)
     else:
-      # crop image to get 1 line in the middle
-      # row = int(im.shape[0]/2.)
-      # step_colums = int(im.shape[1]/64.)
-      # arr = im[row, ::step_colums]
-      # arr_clean = [e if not np.isnan(e) else 5 for e in arr]
-      # arr_clean = np.array(arr_clean)
-      # arr_clean = arr_clean*1/5.-0.5
-      # Go from float to normal image: 
-      # fix nans --> takes a lot of time so better not do this...
-      # shp = im.shape
-      # im=np.asarray([ e*1.0 if not np.isnan(e) else 5. for e in im.flatten()]).reshape(shp)
-      
-      # range [0,5] to [0,1] for resizing
-      im=im*1/5.
-      # Resize image in float
-      im=sm.imresize(im,(55,74),'nearest')
-      #cv2.imshow('target depth rosinterface',im)
-      #cv2.waitKey(1)
-      # check the values
-      # if np.amin(im)==0 or np.amax(im)==0.: return
-      # scale back to [-0.5,0.5]
-      # im=im*1/255.*5.
-      # print(np.amin(im), '<- min max -> ', np.amax(im))
-      
+      im = im[::8,::8]
+      shp=im.shape
+      im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
+      # Resize image
+      im=sm.imresize(im,(55,74),'nearest') # dur: 0.009
+      # cv2.imshow('depth', im) # dur: 0.002
+      # cv2.waitKey(2)
+      im = im *1/255.*5. # dur: 0.00004
     if FLAGS.depth_input:
       self.process_input(im)
     if FLAGS.auxiliary_depth:
       self.target_depth = im #(64,)
     
   def process_input(self, im):
+    self.time_3 = time.time()
     trgt = -100.
     # if self.target_control == None or FLAGS.evaluate:
     if FLAGS.evaluate: ### EVALUATE
       control, _ = self.model.forward([im])
     else: ###TRAINING
       # Get necessary labels, if label is missing wait...
-      if self.target_control == None:
+      if len(self.target_control) == 0:
         print('No target control')
         return
       else:
         trgt = self.target_control[5]
-      if FLAGS.auxiliary_depth and self.target_depth == None:
+      if FLAGS.auxiliary_depth and len(self.target_depth) == 0:
         print('No target depth')
         return
       else:
-        trgt_depth = self.target_depth[:]
-        self.target_depth = None
+        trgt_depth = copy.deepcopy(self.target_depth)
+        self.target_depth = []
+      # check if depth image corresponds to rgb image
+      # cv2.imshow('rgb', im)
+      # cv2.waitKey(2)
+      # cv2.imshow('depth', trgt_depth*1/5.)
+      # cv2.waitKey(2)
       if not FLAGS.experience_replay: ### TRAINING WITHOUT EXPERIENCE REPLAY 
         if FLAGS.auxiliary_depth:
           control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
@@ -272,8 +265,10 @@ class PilotNode(object):
         self.accumloss += losses[0]
       else: ### TRAINING WITH EXPERIENCE REPLAY
         # wait for first target depth in case of auxiliary depth.
-        # in case the network can predict the depth 
+        # in case the network can predict the depth
+        self.time_4 = time.time() 
         control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
+        self.time_5 = time.time()
     # import pdb; pdb.set_trace()
     ### SEND CONTROL
     yaw = control[0,0]
@@ -285,22 +280,37 @@ class PilotNode(object):
     msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.angular.z = yaw
     self.action_pub.publish(msg)
-    
-    if FLAGS.show_depth and self.aux_depth != None :
-      self.depth_pub.publish(np.squeeze(self.aux_depth))
-      # import pdb; pdb.set_trace()
+    self.time_6 = time.time()
+    # if FLAGS.show_depth and self.aux_depth != None :
+    #   # self.aux_depth = self.aux_depth.flatten()
+    #   self.ready=False
+    #   import pdb; pdb.set_trace
+    #   self.depth_pub.publish(self.aux_depth)
+    #   # import pdb; pdb.set_trace()
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
       if FLAGS.auxiliary_depth:
         self.replay_buffer.add(im,[trgt],[trgt_depth])
       else:
         self.replay_buffer.add(im,[trgt])
-
-    if self.last_position and self.ready and self.run:
+    self.time_7 = time.time()
+    if len(self.last_position)!=0 and self.ready and self.run:
       self.runfile = open(self.logfolder+'/runs.txt', 'a')
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
       self.runfile.close()
-  
+    self.time_8 = time.time()
+    print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
+      (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
+    # Delay values with auxiliary depth (at the beginning of training)
+    # cv bridge (RGB): 0.0003s
+    # resize (RGB): 0.0015s
+    # copy control+depth: 2.7e-5 s
+    # net prediction: 0.011s
+    # publication: 0.0002s
+    # fill experience buffer: 1.8e-5 s
+    # write position: 2.1e-6 s
+
+
   def supervised_callback(self, data):
     if not self.ready: return
     if FLAGS.reloaded_by_ros and self.run<=3: return
@@ -319,30 +329,35 @@ class PilotNode(object):
       self.finished=True
       # Train model from experience replay:
       # Train the model with batchnormalization out of the image callback loop
-      activation_images = None
+      activation_images = []
+      depth_predictions = []
+    
+      tloss = [] #total loss
       closs = [] #control loss
       dloss = [] #depth loss
-      tloss = [] #total loss
       #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
           #im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
           batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
-          if b==0 and FLAGS.save_activations:
-            activation_images= self.model.plot_activations(batch[0])
-          if FLAGS.evaluate:
-            # shape control (16,1)
-            controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
-            losses = [loss, 0, 0]
+          if b==0:
+            if FLAGS.save_activations:
+              activation_images= self.model.plot_activations(batch[0])
+            if FLAGS.plot_depth and FLAGS.auxiliary_depth:
+              depth_predictions = self.model.plot_depth(batch[0], batch[2][:].reshape(-1,55,74))
+          # if FLAGS.evaluate:
+          #   # shape control (16,1)
+          #   controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
+          #   losses = [loss, 0, 0]
+          # else:
+          if FLAGS.auxiliary_depth:
+            # controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,1,1,64))
+            # import pdb; pdb.set_trace()
+            controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,55,74))
           else:
-            if FLAGS.auxiliary_depth:
-              # controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,1,1,64))
-              # import pdb; pdb.set_trace()
-              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,74*55))
-            else:
-              controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1))
-            if len(losses) == 2: losses.append(0) #in case there is no depth
+            controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1))
+          if len(losses) == 2: losses.append(0) #in case there is no depth
           tloss.append(losses[0])
           closs.append(losses[1])
           dloss.append(losses[2])
@@ -357,10 +372,11 @@ class PilotNode(object):
         closs = 0
         dloss = 0
       try:
-        if FLAGS.save_activations and activation_images!=None:
-          sumvar=[self.accumloss, self.distance, tloss, closs, dloss, activation_images]
-        else:
-          sumvar=[self.accumloss, self.distance, tloss, closs, dloss]
+        sumvar = [self.accumloss, self.distance, tloss, closs, dloss]
+        if FLAGS.save_activations and len(activation_images)==0:
+          sumvar.append(activation_images)
+        if FLAGS.plot_depth and FLAGS.auxiliary_depth:
+          sumvar.append(depth_predictions)
         self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)
@@ -370,7 +386,7 @@ class PilotNode(object):
       self.accumloss = 0
       self.maxy = -10
       self.distance = 0
-      self.last_position = None
+      self.last_position = []
       
       if self.run%20==0 and not FLAGS.evaluate:
         # Save a checkpoint every 100 runs.
