@@ -343,7 +343,7 @@ class PilotNode(object):
           #print('time to smaple batch of images: ',time.time()-st)
           if b==0:
             if FLAGS.plot_activations:
-              activation_images= self.model.plot_activations(batch[0])
+              activation_images= self.model.plot_activations(batch[0], batch[1].reshape((-1,1)))
             if FLAGS.plot_depth and FLAGS.auxiliary_depth:
               depth_predictions = self.model.plot_depth(batch[0], batch[2][:].reshape(-1,55,74))
             if FLAGS.plot_histograms:
