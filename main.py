@@ -46,7 +46,7 @@ tf.app.flags.DEFINE_float("tau", 0.001, "Update target networks in a soft manner
 # Print output of ros verbose or not
 tf.app.flags.DEFINE_boolean("verbose", True, "Print output of ros verbose or not.")
 # Directory for storing tensorboard summary results
-tf.app.flags.DEFINE_string("summary_dir", '/home/klaas/tensorflow2/log/', "Choose the directory to which tensorflow should save the summaries.")
+tf.app.flags.DEFINE_string("summary_dir", '/home/klaas/tensorflow/log/', "Choose the directory to which tensorflow should save the summaries.")
 # Add log_tag to overcome overwriting of other log files
 tf.app.flags.DEFINE_string("log_tag", 'testing', "Add log_tag to overcome overwriting of other log files.")
 # Choose to run on gpu or cpu
@@ -61,7 +61,7 @@ tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_sup
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
 tf.app.flags.DEFINE_string("network", 'depth', "Define the type of network: inception / fc_control / depth.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
-tf.app.flags.DEFINE_boolean("plot_depth", True, "Specify whether the depth predictions is saved as images.")
+tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 
 # ===========================
 #   Save settings

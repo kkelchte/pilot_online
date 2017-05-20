@@ -59,9 +59,9 @@ def depth_estim_v1(inputs,
       
       end_point = 'Conv_4'
       net = slim.conv2d(net, 256, [3,3], stride=1, scope=end_point)
-      end_points[end_point] = net
-
       prelogits = tf.reshape(net, [-1, 2560])
+      end_points[end_point] = prelogits
+      
       end_point = 'fully_connected'
       aux_logits=slim.fully_connected(prelogits, 4096, tf.nn.relu)
       end_points[end_point] = aux_logits

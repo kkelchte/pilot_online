@@ -6,7 +6,10 @@ import inception
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+from matplotlib import pyplot as plt
+
 import numpy as np
 import math
 
@@ -28,7 +31,7 @@ tf.app.flags.DEFINE_string("model_path", 'depth_net_checkpoint/checkpoint', "Spe
 # tf.app.flags.DEFINE_string("model_path", '/users/visics/kkelchte/tensorflow/models', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
-tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow2/log/inception/', "Specify the directory of the checkpoint of the earlier trained model.")
+tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow/log/2017-04-23_1016_esat_cont_depth0420_1514/', "Specify the directory of the checkpoint of the earlier trained model.")
 tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
@@ -37,7 +40,7 @@ tf.app.flags.DEFINE_boolean("plot_activations", False, "Specify whether the acti
 tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
-tf.app.flags.DEFINE_boolean("plot_histograms", True, "Specify whether to plot histograms of the weights.")
+tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
 
 """
 Build basic NN model
@@ -68,7 +71,7 @@ class Model(object):
     
     if not FLAGS.continue_training:
       if FLAGS.model_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow2/log/'+FLAGS.model_path
+        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.model_path
       else:
         checkpoint_path = FLAGS.model_path
       list_to_exclude = []
@@ -90,7 +93,8 @@ class Model(object):
           'Depth_Estimate_V1/control/control_2/biases'])
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
-      if FLAGS.network == 'depth':
+      # remap only in case of using Toms original network
+      if FLAGS.network == 'depth' and checkpoint_path == '/home/klaas/tensorflow/log/depth_net_checkpoint/checkpoint':
         variables_to_restore = {
           'Conv/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv/weights'),
           'Conv/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv/biases'),
@@ -123,7 +127,7 @@ class Model(object):
     else: #If continue training
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow2/log/'+FLAGS.checkpoint_path
+        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
@@ -355,9 +359,11 @@ class Model(object):
         activation_images.append(buf)
     # Plot using t-SNE
     elif FLAGS.network == 'depth':
+      print('shape inputs: {}'.format(inputs.shape))
       activations = self.sess.run(self.endpoints['Conv_4'], feed_dict={self.inputs:inputs})
       tsne = TSNE(perplexity=30, n_components=2, init='pca', n_iter=5000)
       plot_only = 6
+      print('shape of activations: {}'.format(activations.shape))
       low_d_weights = tsne.fit_transform(activations)
       activation_images.append(self.plot_with_labels(low_d_weights, targets))
     else:
@@ -407,7 +413,7 @@ class Model(object):
     self.add_summary_var("Loss_depth")
 
     if FLAGS.plot_activations:
-      act_images = tf.placeholder(tf.float32, [None, 1500, 1500, 1])
+      act_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
       tf.summary.image("conv_activations", act_images, max_outputs=4)
       self.summary_vars.append(act_images)
     

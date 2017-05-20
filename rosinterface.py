@@ -39,7 +39,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string("rundir", 'runs', "Choose location to keep the trajectories.")
 #tf.app.flags.DEFINE_string("launchfile", 'simulation_supervised.launch', "Choose launch file. If not starting with / the path is seen as relative to current directory")
 tf.app.flags.DEFINE_integer("num_flights", 1000, "the maximum number of tries.")
-tf.app.flags.DEFINE_boolean("render", True, "Render the game while it is being learned.")
+tf.app.flags.DEFINE_boolean("render", False, "Render the game while it is being learned.")
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
 tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
@@ -117,15 +117,18 @@ class PilotNode(object):
     self.run=0
     self.maxy=-10
     self.distance=0
-    self.last_position=None
+    self.last_position=[]
     self.model = model
     self.ready=False 
     self.finished=True
     self.target_control = []
     self.target_depth = []
-    self.aux_depth = None
+    self.aux_depth = []
     rospy.init_node('pilot', anonymous=True)
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
+    if FLAGS.show_depth:
+        self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
+      
     if FLAGS.real: # in the real world on the bebop drone
       rospy.Subscriber('/bebop/image_raw', Image, self.image_callback)
       self.action_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
@@ -136,8 +139,6 @@ class PilotNode(object):
       self.accumloss = 0
       if FLAGS.depth_input or FLAGS.auxiliary_depth:
         rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
-      if FLAGS.show_depth:
-        self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
       if not FLAGS.depth_input:        
         rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
       if FLAGS.off_policy:
@@ -237,7 +238,7 @@ class PilotNode(object):
     trgt = -100.
     # if self.target_control == None or FLAGS.evaluate:
     if FLAGS.evaluate: ### EVALUATE
-      control, _ = self.model.forward([im])
+      control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
     else: ###TRAINING
       # Get necessary labels, if label is missing wait...
       if len(self.target_control) == 0:
@@ -250,7 +251,7 @@ class PilotNode(object):
         return
       else:
         trgt_depth = copy.deepcopy(self.target_depth)
-        self.target_depth = []
+        # self.target_depth = []
       # check if depth image corresponds to rgb image
       # cv2.imshow('rgb', im)
       # cv2.waitKey(2)
@@ -281,12 +282,14 @@ class PilotNode(object):
     msg.angular.z = yaw
     self.action_pub.publish(msg)
     self.time_6 = time.time()
-    # if FLAGS.show_depth and self.aux_depth != None :
-    #   # self.aux_depth = self.aux_depth.flatten()
-    #   self.ready=False
-    #   import pdb; pdb.set_trace
-    #   self.depth_pub.publish(self.aux_depth)
-    #   # import pdb; pdb.set_trace()
+    if FLAGS.show_depth and len(self.aux_depth) != 0 and not self.finished:
+      # print('shape aux depth: {}'.format(self.aux_depth.shape))
+      self.aux_depth = self.aux_depth.flatten()
+      # self.ready=False
+      # import pdb; pdb.set_trace
+      self.depth_pub.publish(self.aux_depth)
+      self.aux_depth = []
+      # import pdb; pdb.set_trace()
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
       if FLAGS.auxiliary_depth:
@@ -299,8 +302,8 @@ class PilotNode(object):
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
       self.runfile.close()
     self.time_8 = time.time()
-    print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
-      (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
+    # print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
+      # (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
     # Delay values with auxiliary depth (at the beginning of training)
     # cv bridge (RGB): 0.0003s
     # resize (RGB): 0.0015s
@@ -324,6 +327,7 @@ class PilotNode(object):
       
   def finished_callback(self,msg):
     if self.ready and not self.finished:
+      # self.depth_pub.publish(self.aux_depth)
       print('neural control deactivated.')
       self.ready=False
       self.finished=True
