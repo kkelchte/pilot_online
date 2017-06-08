@@ -5,9 +5,9 @@ import tensorflow.contrib.slim as slim
 import inception
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
-
-import matplotlib
-matplotlib.use('Agg')
+import os
+# import matplotlib
+# matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
 import numpy as np
@@ -24,20 +24,20 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception ne
 # Std of uniform initialization
 tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 # Base learning rate
-tf.app.flags.DEFINE_float("learning_rate", 0.0001, "Start learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", 'depth_net_checkpoint/checkpoint', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # tf.app.flags.DEFINE_string("model_path", '/users/visics/kkelchte/tensorflow/models', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
-tf.app.flags.DEFINE_string("checkpoint_path", '/home/klaas/tensorflow/log/2017-04-23_1016_esat_cont_depth0420_1514/', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_string("checkpoint_path", '2017-04-23_1016_esat_cont_depth0420_1514', "Specify the directory of the checkpoint of the earlier trained model.")
+tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("plot_activations", False, "Specify whether the activations are weighted.")
-tf.app.flags.DEFINE_float("dropout_keep_prob", 1.0, "Specify the probability of dropout to keep the activation.")
+tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of dropout to keep the activation.")
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
@@ -71,7 +71,7 @@ class Model(object):
     
     if not FLAGS.continue_training:
       if FLAGS.model_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.model_path
+        checkpoint_path = '/esat/qayd/kkelchte/tensorflow/offline_log/'+FLAGS.model_path
       else:
         checkpoint_path = FLAGS.model_path
       list_to_exclude = []
@@ -94,7 +94,7 @@ class Model(object):
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       # remap only in case of using Toms original network
-      if FLAGS.network == 'depth' and checkpoint_path == '/home/klaas/tensorflow/log/depth_net_checkpoint/checkpoint':
+      if FLAGS.network == 'depth' and checkpoint_path == '/esat/qayd/kkelchte/tensorflow/offline_log/depth_net_checkpoint/checkpoint':
         variables_to_restore = {
           'Conv/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv/weights'),
           'Conv/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv/biases'),
@@ -127,9 +127,10 @@ class Model(object):
     else: #If continue training
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
+        checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
+      print(checkpoint_path)
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     
     # create saver for checkpoints

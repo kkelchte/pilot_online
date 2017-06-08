@@ -10,24 +10,20 @@ import tensorflow.contrib.slim as slim
 from tensorflow.contrib.slim.python.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 from tensorflow.python.ops import random_ops
-
 import rospy
 from std_msgs.msg import Empty
-
 import numpy as np
 from model import Model
 import rosinterface
-
-#models:
 import inception
 import fc_control
 import depth_estim
-
 import sys, os, os.path
 import subprocess
 import shutil
 import time
 import signal
+
 # Block all the ugly printing...
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -46,7 +42,7 @@ tf.app.flags.DEFINE_float("tau", 0.001, "Update target networks in a soft manner
 # Print output of ros verbose or not
 tf.app.flags.DEFINE_boolean("verbose", True, "Print output of ros verbose or not.")
 # Directory for storing tensorboard summary results
-tf.app.flags.DEFINE_string("summary_dir", '/home/klaas/tensorflow/log/', "Choose the directory to which tensorflow should save the summaries.")
+tf.app.flags.DEFINE_string("summary_dir", '/esat/qayd/kkelchte/tensorflow/online_log/', "Choose the directory to which tensorflow should save the summaries.")
 # Add log_tag to overcome overwriting of other log files
 tf.app.flags.DEFINE_string("log_tag", 'testing', "Add log_tag to overcome overwriting of other log files.")
 # Choose to run on gpu or cpu
@@ -84,20 +80,23 @@ def save_config(logfolder, file_name = "configuration"):
 
 # Use the main method for starting the training procedure and closing it in the end.
 def main(_):
+  # summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)
+  summary_dir = FLAGS.summary_dir
+  print("summary dir: {}".format(summary_dir))
   #Check log folders and if necessary remove:
   if FLAGS.log_tag == 'testing' or FLAGS.owr:
-    if os.path.isdir(FLAGS.summary_dir+FLAGS.log_tag):
-      shutil.rmtree(FLAGS.summary_dir+FLAGS.log_tag,ignore_errors=True)
+    if os.path.isdir(summary_dir+FLAGS.log_tag):
+      shutil.rmtree(summary_dir+FLAGS.log_tag,ignore_errors=False)
   else :
-    if os.path.isdir(FLAGS.summary_dir+FLAGS.log_tag):
-      raise NameError( 'Logfolder already exists, overwriting alert: '+ FLAGS.summary_dir+FLAGS.log_tag ) 
-  os.mkdir(FLAGS.summary_dir+FLAGS.log_tag)
-  save_config(FLAGS.summary_dir+FLAGS.log_tag)
-
+    if os.path.isdir(summary_dir+FLAGS.log_tag):
+      raise NameError( 'Logfolder already exists, overwriting alert: '+ summary_dir+FLAGS.log_tag ) 
+  os.mkdir(summary_dir+FLAGS.log_tag)
+  save_config(summary_dir+FLAGS.log_tag)
+    
   # some startup settings
   np.random.seed(FLAGS.random_seed)
   tf.set_random_seed(FLAGS.random_seed)
-  
+    
   #define the size of the network input
   if FLAGS.network == 'inception':
     state_dim = [1, inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
@@ -107,30 +106,31 @@ def main(_):
     state_dim = depth_estim.depth_estim_v1.input_size
   else:
     raise NameError( 'Network is unknown: ', FLAGS.network)
-  
+    
   action_dim = 1 #initially only turn and go straight
   
   print( "Number of State Dimensions:", state_dim)
   print( "Number of Action Dimensions:", action_dim)
   print( "Action bound:", FLAGS.action_bound)\
   
-  tf.logging.set_verbosity(tf.logging.DEBUG)
-  inputs=random_ops.random_uniform(state_dim)
-  targets=random_ops.random_uniform((1,action_dim))
-  depth_targets=random_ops.random_uniform((1,1,1,64))
+  # tf.logging.set_verbosity(tf.logging.DEBUG)
+  # inputs=random_ops.random_uniform(state_dim)
+  # targets=random_ops.random_uniform((1,action_dim))
+  # depth_targets=random_ops.random_uniform((1,1,1,64))
   
   gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.7)
   config=tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
   config.gpu_options.allow_growth = True
   sess = tf.Session(config=config)
   model = Model(sess, state_dim, action_dim, bound=FLAGS.action_bound)
-  writer = tf.summary.FileWriter(FLAGS.summary_dir+FLAGS.log_tag, sess.graph)
+  writer = tf.summary.FileWriter(summary_dir+FLAGS.log_tag, sess.graph)
   model.writer = writer
+    
   #model = None
   if FLAGS.launch_ros:
     rosinterface.launch()
-  rosnode = rosinterface.PilotNode(model, FLAGS.summary_dir+FLAGS.log_tag)
-  
+  rosnode = rosinterface.PilotNode(model, summary_dir+FLAGS.log_tag)
+    
   #def kill_callback(msg):
     #global rosnode
     #print("MAIN: dereferenced rosnode")
@@ -141,7 +141,7 @@ def main(_):
       ##gzservercount = os.popen("ps -Af").read().count('gzserver')
       ##time.sleep(0.1)
     #print ("MAIN: gzserver is relaunched!")
-    #rosnode = rosinterface.PilotNode(model, FLAGS.summary_dir+FLAGS.log_tag)
+    #rosnode = rosinterface.PilotNode(model, summary_dir+FLAGS.log_tag)
   
   #rospy.Subscriber('/roskill', Empty, kill_callback)
 
@@ -164,7 +164,7 @@ def main(_):
   def signal_handler(signal, frame):
     print('You pressed Ctrl+C!')
     if FLAGS.launch_ros:
-      #model.save(FLAGS.summary_dir+FLAGS.log_tag)
+      #model.save(summary_dir+FLAGS.log_tag)
       rosinterface.close()
     sess.close()
     print('done.')
@@ -173,6 +173,7 @@ def main(_):
   print('------------Press Ctrl+C to end the learning')
   while True:
     try:
+      sys.stdout.flush()
       signal.pause()
     except Exception as e:
       print('! EXCEPTION: ',e)

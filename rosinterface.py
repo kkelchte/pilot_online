@@ -47,10 +47,10 @@ tf.app.flags.DEFINE_float("mean", 0., "Define the mean of the input data for cen
 tf.app.flags.DEFINE_float("std", 1., "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
-tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
-tf.app.flags.DEFINE_float("epsilon", 0.001, "Epsilon is the probability that the control is picked randomly.")
-tf.app.flags.DEFINE_float("alpha", 0.0001, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
-tf.app.flags.DEFINE_float("speed", 0.8, "Define the forward speed of the quadrotor.")
+# tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
+tf.app.flags.DEFINE_float("epsilon", 0.1, "Epsilon is the probability that the control is picked randomly.")
+tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
+tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
 # =================================================
@@ -112,6 +112,7 @@ def close():
 class PilotNode(object):
   
   def __init__(self, model, logfolder):
+    print('initialize pilot node')
     # Initialize replay memory
     self.logfolder = logfolder
     self.run=0
@@ -127,35 +128,32 @@ class PilotNode(object):
     rospy.init_node('pilot', anonymous=True)
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
-        self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
-      
-    if FLAGS.real: # in the real world on the bebop drone
-      rospy.Subscriber('/bebop/image_raw', Image, self.image_callback)
-      self.action_pub = rospy.Publisher('/bebop/cmd_vel', Twist, queue_size=1)
-      rospy.Subscriber('/bebop/ready', Empty, self.ready_callback)
-      rospy.Subscriber('/bebop/overtake', Empty, self.overtake_callback)
-    else: # in simulation
+      self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
+    if FLAGS.off_policy:
+      self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
+      if rospy.has_param('control'):
+        rospy.Subscriber(rospy.get_param('control'), Twist, self.supervised_callback)
+    else:
+      rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
+      if rospy.has_param('control'):
+        self.action_pub = rospy.Publisher(rospy.get_param('control'), Twist, queue_size=1)
+    if rospy.has_param('ready'): 
+      rospy.Subscriber(rospy.get_param('ready'), Empty, self.ready_callback)
+    if rospy.has_param('finished'):
+      rospy.Subscriber(rospy.get_param('finished'), Empty, self.finished_callback)
+    if rospy.has_param('rgb_image'):
+      rospy.Subscriber(rospy.get_param('rgb_image'), Image, self.image_callback)
+    if rospy.has_param('overtake'):
+      rospy.Subscriber(rospy.get_param('overtake'), Empty, self.overtake_callback)
+    if rospy.has_param('depth_image'):
+      if FLAGS.depth_input:        
+        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.image_callback)
+      if FLAGS.auxiliary_depth:
+        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_image_callback)
+    if not FLAGS.real: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
-      if FLAGS.depth_input or FLAGS.auxiliary_depth:
-        rospy.Subscriber('/ardrone/kinect/depth/image_raw', Image, self.depth_image_callback)
-      if not FLAGS.depth_input:        
-        rospy.Subscriber('/ardrone/kinect/image_raw', Image, self.image_callback)
-      if FLAGS.off_policy:
-        self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
-      else:
-        self.action_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-      rospy.Subscriber('/ready', Empty, self.ready_callback)
-      rospy.Subscriber('/finished', Empty, self.finished_callback)
-      #rospy.Subscriber('/finished', Empty, self.overtake_callback)
-      #rospy.Subscriber('/ardrone/overtake', Empty, self.overtake_callback)
       rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
-      if FLAGS.off_policy:
-        rospy.Subscriber('/cmd_vel', Twist, self.supervised_callback)
-      else:
-        rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
-    #if FLAGS.evaluate and FLAGS.plot_activations: 
-      #raise Exception('Cant evaluate and save activations in current implementation.')
       
   def overtake_callback(self, data):
     if self.ready:
@@ -183,7 +181,7 @@ class PilotNode(object):
     
     #if self.ready and not self.finished:
       #time.sleep(0.5)
-    #print(self.distance)
+    # print(self.distance)
   
   def image_callback(self, data):
     self.time_1 = time.time()
@@ -316,14 +314,15 @@ class PilotNode(object):
 
   def supervised_callback(self, data):
     if not self.ready: return
-    if FLAGS.reloaded_by_ros and self.run<=3: return
-    else:
-      self.target_control = [data.linear.x,
-        data.linear.y,
-        data.linear.z,
-        data.angular.x,
-        data.angular.y,
-        data.angular.z]
+    # Klaas adjustment 05/06/2017
+    # if FLAGS.reloaded_by_ros and self.run<=3: return
+    # else:
+    self.target_control = [data.linear.x,
+      data.linear.y,
+      data.linear.z,
+      data.angular.x,
+      data.angular.y,
+      data.angular.z]
       
   def finished_callback(self,msg):
     if self.ready and not self.finished:
