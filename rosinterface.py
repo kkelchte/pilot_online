@@ -32,6 +32,8 @@ from rospy.numpy_msg import numpy_msg
 from rospy_tutorials.msg import Floats
 from nav_msgs.msg import Odometry
 
+from ou_noise import OUNoise
+
 #from PIL import Image
 
 FLAGS = tf.app.flags.FLAGS
@@ -50,6 +52,7 @@ tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RG
 # tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
 tf.app.flags.DEFINE_float("epsilon", 0.1, "Epsilon is the probability that the control is picked randomly.")
 tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
+
 tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
@@ -113,6 +116,7 @@ class PilotNode(object):
   
   def __init__(self, model, logfolder):
     print('initialize pilot node')
+
     # Initialize replay memory
     self.logfolder = logfolder
     self.run=0
@@ -126,6 +130,9 @@ class PilotNode(object):
     self.target_depth = []
     self.aux_depth = []
     rospy.init_node('pilot', anonymous=True)
+    
+    self.exploration_noise = OUNoise(4)
+
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
       self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
@@ -167,6 +174,7 @@ class PilotNode(object):
       self.ready = True
       self.start_time = rospy.get_time()
       self.finished = False
+      self.exploration_noise.reset()
     
   def gt_callback(self, data):
     if not self.ready: return
@@ -270,13 +278,18 @@ class PilotNode(object):
         self.time_5 = time.time()
     # import pdb; pdb.set_trace()
     ### SEND CONTROL
+    noise = self.exploration_noise.noise()
     yaw = control[0,0]
     if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
-      yaw = max(-1,min(1,np.random.normal()))
+      # yaw = max(-1,min(1,np.random.normal()))
+      yaw = max(-1,min(1,noise[3]))
     msg = Twist()
-    msg.linear.x = FLAGS.speed #0.8 # 1.8 #
-    msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
-    msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
+    msg.linear.x = FLAGS.speed * (1+noise[0]*0.2) #0.8 # 1.8 #
+    # msg.linear.x = FLAGS.speed #0.8 # 1.8 #
+    msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.alpha
+    # msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
+    msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.alpha
+    # msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.angular.z = yaw
     self.action_pub.publish(msg)
     self.time_6 = time.time()
