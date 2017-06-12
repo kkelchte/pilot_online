@@ -1,7 +1,7 @@
 import rospy
 import numpy as np
 import scipy.misc as sm
-import os
+import os, sys
 import subprocess
 from os import path
 import rospy
@@ -125,6 +125,7 @@ class PilotNode(object):
     self.target_control = []
     self.target_depth = []
     self.aux_depth = []
+    self.runfile = open(self.logfolder+'/runs.txt', 'a')
     rospy.init_node('pilot', anonymous=True)
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
@@ -167,6 +168,7 @@ class PilotNode(object):
       self.ready = True
       self.start_time = rospy.get_time()
       self.finished = False
+      sys.stdout.flush()
     
   def gt_callback(self, data):
     if not self.ready: return
@@ -296,9 +298,8 @@ class PilotNode(object):
         self.replay_buffer.add(im,[trgt])
     self.time_7 = time.time()
     if len(self.last_position)!=0 and self.ready and self.run:
-      self.runfile = open(self.logfolder+'/runs.txt', 'a')
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-      self.runfile.close()
+      # self.runfile.close()
     self.time_8 = time.time()
     # print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
       # (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
@@ -406,3 +407,4 @@ class PilotNode(object):
         #print('gzserver: ',gzservercount)
         gzservercount = os.popen("ps -Af").read().count('gzserver')
         time.sleep(0.1)
+      sys.stdout.flush()
