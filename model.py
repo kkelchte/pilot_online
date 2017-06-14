@@ -71,7 +71,9 @@ class Model(object):
     
     if not FLAGS.continue_training:
       if FLAGS.model_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.model_path
+        # checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.model_path
+        checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.model_path)
+        # checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.model_path
       else:
         checkpoint_path = FLAGS.model_path
       list_to_exclude = []
@@ -94,7 +96,7 @@ class Model(object):
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       # remap only in case of using Toms original network
-      if FLAGS.network == 'depth' and checkpoint_path == '/home/klaas/tensorflow/log/depth_net_checkpoint/checkpoint':
+      if FLAGS.network == 'depth' and checkpoint_path == os.path.join(os.getenv('HOME'),'tensorflow/log','depth_net_checkpoint/checkpoint'):
         variables_to_restore = {
           'Conv/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv/weights'),
           'Conv/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv/biases'),
@@ -127,7 +129,9 @@ class Model(object):
     else: #If continue training
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
-        checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
+        checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.checkpoint_path)
+        # checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.checkpoint_path
+        # checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
       print(checkpoint_path)

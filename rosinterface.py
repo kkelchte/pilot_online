@@ -129,7 +129,6 @@ class PilotNode(object):
     self.target_control = []
     self.target_depth = []
     self.aux_depth = []
-    self.runfile = open(self.logfolder+'/runs.txt', 'a')
     rospy.init_node('pilot', anonymous=True)
     
     self.exploration_noise = OUNoise(4)
@@ -310,8 +309,9 @@ class PilotNode(object):
         self.replay_buffer.add(im,[trgt])
     self.time_7 = time.time()
     if len(self.last_position)!=0 and self.ready and self.run:
+      self.runfile = open(self.logfolder+'/runs.txt', 'a')
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-      # self.runfile.close()
+      self.runfile.close()
     self.time_8 = time.time()
     # print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
       # (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
@@ -402,7 +402,7 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('control finished {0}:[ acc loss: {1:0.3f}, distance: {2:0.3f}, total loss: {3:0.3f}, control loss: {4:0.3f}, depth loss: {5:0.3f}]'.format(self.run, self.accumloss, self.distance, tloss, closs, dloss))
+        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, distance: {3:0.3f}, total loss: {4:0.3f}, control loss: {5:0.3f}, depth loss: {6:0.3f}]'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.distance, tloss, closs, dloss))
       self.accumloss = 0
       self.maxy = -10
       self.distance = 0

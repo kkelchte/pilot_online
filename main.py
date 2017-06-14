@@ -42,7 +42,8 @@ tf.app.flags.DEFINE_float("tau", 0.001, "Update target networks in a soft manner
 # Print output of ros verbose or not
 tf.app.flags.DEFINE_boolean("verbose", True, "Print output of ros verbose or not.")
 # Directory for storing tensorboard summary results
-tf.app.flags.DEFINE_string("summary_dir", '/home/klaas/tensorflow/log/', "Choose the directory to which tensorflow should save the summaries.")
+tf.app.flags.DEFINE_string("summary_dir", 'tensorflow/log/', "Choose the directory to which tensorflow should save the summaries.")
+# tf.app.flags.DEFINE_string("summary_dir", '/esat/qayd/kkelchte/tensorflow/online_log/', "Choose the directory to which tensorflow should save the summaries.")
 # Add log_tag to overcome overwriting of other log files
 tf.app.flags.DEFINE_string("log_tag", 'testing', "Add log_tag to overcome overwriting of other log files.")
 # Choose to run on gpu or cpu
@@ -80,8 +81,8 @@ def save_config(logfolder, file_name = "configuration"):
 
 # Use the main method for starting the training procedure and closing it in the end.
 def main(_):
-  # summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)
-  summary_dir = FLAGS.summary_dir
+  summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)
+  # summary_dir = FLAGS.summary_dir
   print("summary dir: {}".format(summary_dir))
   #Check log folders and if necessary remove:
   if FLAGS.log_tag == 'testing' or FLAGS.owr:
