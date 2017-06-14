@@ -56,6 +56,9 @@ tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the ge
 tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
+
+tf.app.flags.DEFINE_float("ou_theta", 0.15, "Epsilon is the probability that the control is picked randomly.")
+tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 # =================================================
 
 launch_popen=None
@@ -131,7 +134,7 @@ class PilotNode(object):
     self.aux_depth = []
     rospy.init_node('pilot', anonymous=True)
     
-    self.exploration_noise = OUNoise(4)
+    self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta, FLAGS.ou_sigma)
 
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
