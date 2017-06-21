@@ -8,6 +8,7 @@ import rospy
 import time
 from cv_bridge import CvBridge, CvBridgeError
 import cv2
+import re
 # Instantiate CvBridge
 bridge = CvBridge()
 
@@ -56,6 +57,7 @@ tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the ge
 tf.app.flags.DEFINE_float("speed", 1.8, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
+tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
 
 tf.app.flags.DEFINE_float("ou_theta", 0.15, "Epsilon is the probability that the control is picked randomly.")
 tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
@@ -63,58 +65,6 @@ tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the 
 
 launch_popen=None
 
-def launch():
-  global launch_popen
-  """ launch ros, gazebo and this node """
-  #start roscore
-  #if not FLAGS.real_evaluation:
-  if FLAGS.render: render='true'
-  else: render='false'
-  launchfile='simulation_supervised.launch'
-  evaluate='false'
-  #subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh", shell=True)
-  #else:
-    #launchfile='real_world.launch'
-    #render='false'
-    #evaluate='true'
-  #launch_popen=subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh "+launchfile+" "+str(FLAGS.num_flights)+' '+render+' '+evaluate, shell=True)
-  launch_popen=subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh "+str(FLAGS.num_flights), shell=True)
-    
-  #if not FLAGS.real_evaluation:
-    # wait for gzserver to be launched:
-  gzservercount=0
-  while gzservercount == 0:
-    #print('gzserver: ',gzservercount)
-    gzservercount = os.popen("ps -Af").read().count('gzserver')
-    time.sleep(0.1)
-  print ("Roscore launched! ", launch_popen.pid)
-  
-def close():
-  """ Kill gzclient, gzserver and roscore"""
-  if launch_popen:
-    os.popen("kill -9 "+str(launch_popen.pid))
-    launch_popen.wait()
-  tmp = os.popen("ps -Af").read()
-  gzclient_count = tmp.count('gzclient')
-  gzserver_count = tmp.count('gzserver')
-  roscore_count = tmp.count('roscore')
-  rosmaster_count = tmp.count('rosmaster')
-  launch_online_count = tmp.count('launch_online')
-  print("processes busy: ",' ',str(gzclient_count),' ',str(gzserver_count),' ',str(roscore_count),' ',str(rosmaster_count),' ',str(launch_online_count))
-  if gzclient_count > 0:
-      os.system("killall -9 gzclient")
-  if gzserver_count > 0:
-      os.system("killall -9 gzserver")
-  if rosmaster_count > 0:
-      os.system("killall -9 rosmaster")
-  if roscore_count > 0:
-      os.system("killall -9 roscore")
-  if roscore_count > 0:
-      os.system("killall -9 roscore")
-
-  if (gzclient_count or gzserver_count or roscore_count or rosmaster_count >0):
-    os.wait()
-  
 class PilotNode(object):
   
   def __init__(self, model, logfolder):
@@ -133,7 +83,6 @@ class PilotNode(object):
     self.target_depth = []
     self.aux_depth = []
     rospy.init_node('pilot', anonymous=True)
-    
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta, FLAGS.ou_sigma)
 
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
@@ -159,7 +108,20 @@ class PilotNode(object):
       if FLAGS.depth_input:        
         rospy.Subscriber(rospy.get_param('depth_image'), Image, self.image_callback)
       if FLAGS.auxiliary_depth:
-        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_image_callback)
+        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
+    if FLAGS.recovery_cameras:
+      # callbacks={'left':{'30':image_callback_left_30,'60':image_callback_left_60},'right':{'30':image_callback_right_30,'60':image_callback_right_60}}
+      # callbacks_depth={'left':{'30':depth_callback_left_30,'60':depth_callback_left_60},'right':{'30':depth_callback_right_30,'60':depth_callback_right_60}}
+      self.recovery_images = {}
+      for d in ['left','right']:
+        self.recovery_images[d] = {}
+        for c in ['30','60']:
+          self.recovery_images[d][c]={}
+          self.recovery_images[d][c]['rgb']=[]
+          self.recovery_images[d][c]['depth']=[]
+          rospy.Subscriber(re.sub(r"kinect","kinect_"+d+"_"+c,rospy.get_param('rgb_image')), Image, self.image_callback_recovery, (d, c))
+          rospy.Subscriber(re.sub(r"kinect","kinect_"+d+"_"+c,rospy.get_param('depth_image')), Image, self.depth_callback_recovery, (d, c))
+      
     if not FLAGS.real: # in simulation
       self.replay_buffer = ReplayBuffer(FLAGS.buffer_size, FLAGS.random_seed)
       self.accumloss = 0
@@ -194,17 +156,17 @@ class PilotNode(object):
       #time.sleep(0.5)
     # print(self.distance)
   
-  def image_callback(self, data):
-    self.time_1 = time.time()
+  def process_rgb(self, msg):
+    # self.time_1 = time.time()
     # if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
-    if not self.ready or self.finished: return
+    if not self.ready or self.finished: return []
     try:
       # Convert your ROS Image message to OpenCV2
-      im = bridge.imgmsg_to_cv2(data, 'bgr8') 
+      im = bridge.imgmsg_to_cv2(msg, 'bgr8') 
     except CvBridgeError as e:
       print(e)
     else:
-      self.time_2 = time.time()
+      # self.time_2 = time.time()
       #print('received image')
       # 360*640*3
       #(rows,cols,channels) = cv2_img.shape
@@ -218,14 +180,14 @@ class PilotNode(object):
       # Basic preprocessing: center + make 1 standard deviation
       # im -= FLAGS.mean
       # im = im*1/FLAGS.std
-      self.process_input(im)
+      return im
 
-  def depth_image_callback(self, data):
+  def process_depth(self, msg):
     # if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
-    if not self.ready or self.finished: return  
+    if not self.ready or self.finished: return [] 
     try:
       # Convert your ROS Image message to OpenCV2
-      im = bridge.imgmsg_to_cv2(data, desired_encoding='passthrough')#gets float of 32FC1 depth image
+      im = bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')#gets float of 32FC1 depth image
     except CvBridgeError as e:
       print(e)
     else:
@@ -237,10 +199,45 @@ class PilotNode(object):
       # cv2.imshow('depth', im) # dur: 0.002
       # cv2.waitKey(2)
       im = im *1/255.*5. # dur: 0.00004
-    if FLAGS.depth_input:
-      self.process_input(im)
-    if FLAGS.auxiliary_depth:
-      self.target_depth = im #(64,)
+      return im
+    
+  def image_callback(self, msg):
+    im = self.process_rgb(msg)
+    if len(im)!=0: self.process_input(im)
+
+  def image_callback_recovery(self, msg, args):
+    im = self.process_rgb(msg)
+    if len(im)==0: return
+    trgt = -100.
+    if FLAGS.auxiliary_depth and len(self.recovery_images[args[0]][args[1]]['depth']) == 0:
+      print("No target depth: {0} {1}".format(args[0], args[1]))
+      return
+    else: trgt_depth = copy.deepcopy(self.recovery_images[args[0]][args[1]]['depth'])  
+    if len(self.target_control) == 0:
+      print("No target control: {0} {1}".format(args[0], args[1]))
+      return
+    else:
+      # left ==> -1, right ==> +1, 30dg ==> 0.5, 60dg ==> 1.0
+      compensation = -(args[0]=='left')*int(args[1])/60.+(args[0]=='right')*int(args[1])/60.
+      trgt = compensation+self.target_control[5]
+    if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
+      if FLAGS.auxiliary_depth:
+        print('added experience of camera: {0} {1} with control {2}'.format(args[0],args[1],trgt))
+        self.replay_buffer.add(im,[trgt],[trgt_depth])
+      else:
+        self.replay_buffer.add(im,[trgt])
+    
+  def depth_callback(self, msg):
+    im = self.process_depth(msg)
+    if len(im)!=0: 
+      if FLAGS.depth_input:
+        self.process_input(im)
+      if FLAGS.auxiliary_depth:
+        self.target_depth = im #(64,)
+        
+  def depth_callback_recovery(self, msg, args):
+    im = self.process_depth(msg)
+    self.recovery_images[args[0]][args[1]]['depth'] = im
     
   def process_input(self, im):
     self.time_3 = time.time()
@@ -326,7 +323,6 @@ class PilotNode(object):
     # publication: 0.0002s
     # fill experience buffer: 1.8e-5 s
     # write position: 2.1e-6 s
-
 
   def supervised_callback(self, data):
     if not self.ready: return
@@ -423,3 +419,56 @@ class PilotNode(object):
         gzservercount = os.popen("ps -Af").read().count('gzserver')
         time.sleep(0.1)
       sys.stdout.flush()
+
+def launch():
+  global launch_popen
+  """ launch ros, gazebo and this node """
+  #start roscore
+  #if not FLAGS.real_evaluation:
+  if FLAGS.render: render='true'
+  else: render='false'
+  launchfile='simulation_supervised.launch'
+  evaluate='false'
+  #subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh", shell=True)
+  #else:
+    #launchfile='real_world.launch'
+    #render='false'
+    #evaluate='true'
+  #launch_popen=subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh "+launchfile+" "+str(FLAGS.num_flights)+' '+render+' '+evaluate, shell=True)
+  launch_popen=subprocess.Popen("/home/klaas/sandbox_ws/src/sandbox/scripts/launch_online.sh "+str(FLAGS.num_flights), shell=True)
+    
+  #if not FLAGS.real_evaluation:
+    # wait for gzserver to be launched:
+  gzservercount=0
+  while gzservercount == 0:
+    #print('gzserver: ',gzservercount)
+    gzservercount = os.popen("ps -Af").read().count('gzserver')
+    time.sleep(0.1)
+  print ("Roscore launched! ", launch_popen.pid)
+  
+def close():
+  """ Kill gzclient, gzserver and roscore"""
+  if launch_popen:
+    os.popen("kill -9 "+str(launch_popen.pid))
+    launch_popen.wait()
+  tmp = os.popen("ps -Af").read()
+  gzclient_count = tmp.count('gzclient')
+  gzserver_count = tmp.count('gzserver')
+  roscore_count = tmp.count('roscore')
+  rosmaster_count = tmp.count('rosmaster')
+  launch_online_count = tmp.count('launch_online')
+  print("processes busy: ",' ',str(gzclient_count),' ',str(gzserver_count),' ',str(roscore_count),' ',str(rosmaster_count),' ',str(launch_online_count))
+  if gzclient_count > 0:
+      os.system("killall -9 gzclient")
+  if gzserver_count > 0:
+      os.system("killall -9 gzserver")
+  if rosmaster_count > 0:
+      os.system("killall -9 rosmaster")
+  if roscore_count > 0:
+      os.system("killall -9 roscore")
+  if roscore_count > 0:
+      os.system("killall -9 roscore")
+
+  if (gzclient_count or gzserver_count or roscore_count or rosmaster_count >0):
+    os.wait()
+  
