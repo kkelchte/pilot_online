@@ -287,8 +287,8 @@ class PilotNode(object):
       # yaw = max(-1,min(1,np.random.normal()))
       yaw = max(-1,min(1,noise[3]))
     msg = Twist()
-    msg.linear.x = FLAGS.speed * (1+noise[0]*0.2) #0.8 # 1.8 #
-    # msg.linear.x = FLAGS.speed #0.8 # 1.8 #
+    # msg.linear.x = FLAGS.speed * (1+noise[0]*0.2) #0.8 # 1.8 #
+    msg.linear.x = FLAGS.speed #0.8 # 1.8 #
     msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.alpha
     # msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
     msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.alpha
