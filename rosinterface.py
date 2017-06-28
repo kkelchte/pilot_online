@@ -54,7 +54,7 @@ tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RG
 tf.app.flags.DEFINE_float("epsilon", 0.1, "Epsilon is the probability that the control is picked randomly.")
 tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 
-tf.app.flags.DEFINE_float("speed", 1.8, "Define the forward speed of the quadrotor.")
+tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
 tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
