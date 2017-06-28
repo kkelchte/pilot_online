@@ -62,7 +62,7 @@ tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrot
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
 tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
-tf.app.flags.DEFINE_boolean("save_input",True,"Write depth input to file in order to check values later.")
+tf.app.flags.DEFINE_boolean("save_input",False,"Write depth input to file in order to check values later.")
 
 tf.app.flags.DEFINE_float("ou_theta", 0.15, "Epsilon is the probability that the control is picked randomly.")
 # tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
