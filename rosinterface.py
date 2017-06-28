@@ -264,6 +264,7 @@ class PilotNode(object):
         return
       else:
         trgt = self.target_control[5]
+        # print(trgt)
       if FLAGS.auxiliary_depth and len(self.target_depth) == 0:
         print('No target depth')
         return
@@ -296,13 +297,11 @@ class PilotNode(object):
     # yaw = max(-1,min(1,np.random.normal()))
     msg = Twist()
     if FLAGS.type_of_noise == 'ou':
-      print('use ou noise')
       msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
       msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
       msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
       msg.angular.z = max(-1,min(1,control[0,0]+FLAGS.sigma_yaw*noise[3]))
     elif FLAGS.type_of_noise == 'uni':
-      print('use uni noise')
       msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)
       msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_z, FLAGS.sigma_z)
@@ -330,6 +329,13 @@ class PilotNode(object):
       self.runfile = open(self.logfolder+'/runs.txt', 'a')
       self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
       self.runfile.close()
+    if FLAGS.save_input: 
+      self.depthfile = open(self.logfolder+'/depth_input', 'a')
+      np.set_printoptions(precision=5)
+      message="{0} : {1} : {2:.4f} \n".format(self.run, ' '.join('{0:.5f}'.format(k) for k in np.asarray(im)), trgt)
+      # print('{}'.format(message))
+      self.depthfile.write(message)
+      self.depthfile.close()
     self.time_8 = time.time()
     # print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
       # (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
