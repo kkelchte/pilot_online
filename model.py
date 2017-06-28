@@ -3,6 +3,7 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 #from tensorflow.contrib.slim.nets import inception
 import inception
+import fc_control
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 import os
@@ -125,7 +126,10 @@ class Model(object):
           'fully_connected_1/weights':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/weights'),
           'fully_connected_1/biases':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/biases')
           }
-      init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
+      if FLAGS.network == 'fc_control':
+        init_assign_op = None
+      else:
+        init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     else: #If continue training
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
@@ -152,8 +156,9 @@ class Model(object):
     
     init_all=tf_variables.global_variables_initializer()
     self.sess.run([init_all])
-    self.sess.run([init_assign_op], init_feed_dict)
-    print('Successfully loaded model from:', checkpoint_path)  
+    if init_assign_op != None:
+      self.sess.run([init_assign_op], init_feed_dict)
+      print('Successfully loaded model from:', checkpoint_path)  
     # import pdb; pdb.set_trace()
   
   def define_network(self):
@@ -173,10 +178,12 @@ class Model(object):
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 
-          self.outputs, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
+          self.outputs, self.endpoints = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+          self.controls, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
+            is_training=False, dropout_keep_prob=FLAGS.dropout_keep_prob, reuse=True)
           if(self.bound!=1 or self.bound!=0):
-            self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
+            self.outputs = tf.multiply(self.outputs, self.bound) # Scale output to -bound to bound
       elif FLAGS.network=='depth':
         with slim.arg_scope(depth_estim.arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
           # Define model with SLIM, second returned value are endpoints to get activations of certain nodes

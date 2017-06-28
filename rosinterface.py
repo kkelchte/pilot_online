@@ -51,16 +51,21 @@ tf.app.flags.DEFINE_float("std", 1., "Define the standard deviation of the data 
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
 tf.app.flags.DEFINE_boolean("depth_input", False, "Use depth input instead of RGB for training the network.")
 # tf.app.flags.DEFINE_boolean("reloaded_by_ros", False, "This boolean postpones filling the replay buffer as it is just loaded by ros after a crash. It will keep the target_control None for the three runs.")
-tf.app.flags.DEFINE_float("epsilon", 0.1, "Epsilon is the probability that the control is picked randomly.")
-tf.app.flags.DEFINE_float("alpha", 0.01, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
-
+# tf.app.flags.DEFINE_float("epsilon", 0.1, "Epsilon is the probability that the control is picked randomly.")
+tf.app.flags.DEFINE_string("type_of_noise", 'ou', "Define whether the noise is temporally correlated (ou) or uniformly distributed (uni).")
+tf.app.flags.DEFINE_float("sigma_z", 0.01, "sigma_z is the amount of noise in the z direction.")
+tf.app.flags.DEFINE_float("sigma_x", 0.01, "sigma_x is the amount of noise in the forward speed.")
+tf.app.flags.DEFINE_float("sigma_y", 0.01, "sigma_y is the amount of noise in the y direction.")
+tf.app.flags.DEFINE_float("sigma_yaw", 0.0, "sigma_yaw is the amount of noise added to the steering angle.")
 tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
+
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
 tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
+tf.app.flags.DEFINE_boolean("save_input",True,"Write depth input to file in order to check values later.")
 
 tf.app.flags.DEFINE_float("ou_theta", 0.15, "Epsilon is the probability that the control is picked randomly.")
-tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
+# tf.app.flags.DEFINE_float("ou_sigma", 0.3, "Alpha is the amount of noise in the general y, z and Y direction during training to ensure it visits the whole corridor.")
 # =================================================
 
 launch_popen=None
@@ -83,7 +88,7 @@ class PilotNode(object):
     self.target_depth = []
     self.aux_depth = []
     rospy.init_node('pilot', anonymous=True)
-    self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta, FLAGS.ou_sigma)
+    self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
 
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
@@ -100,13 +105,13 @@ class PilotNode(object):
       rospy.Subscriber(rospy.get_param('ready'), Empty, self.ready_callback)
     if rospy.has_param('finished'):
       rospy.Subscriber(rospy.get_param('finished'), Empty, self.finished_callback)
-    if rospy.has_param('rgb_image'):
+    if rospy.has_param('rgb_image') and not FLAGS.depth_input:
       rospy.Subscriber(rospy.get_param('rgb_image'), Image, self.image_callback)
     if rospy.has_param('overtake'):
       rospy.Subscriber(rospy.get_param('overtake'), Empty, self.overtake_callback)
     if rospy.has_param('depth_image'):
       if FLAGS.depth_input:        
-        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.image_callback)
+        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
       if FLAGS.auxiliary_depth:
         rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
     if FLAGS.recovery_cameras:
@@ -195,8 +200,15 @@ class PilotNode(object):
       shp=im.shape
       im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
       # Resize image
-      im=sm.imresize(im,(55,74),'nearest') # dur: 0.009
-      # cv2.imshow('depth', im) # dur: 0.002
+      if FLAGS.auxiliary_depth:
+        size = (55,74)
+        im=sm.imresize(im,size,'nearest') # dur: 0.002
+        # cv2.imshow('depth', im) # dur: 0.002
+      if FLAGS.depth_input:
+        size = (fc_control.fc_control_v1.input_size, fc_control.fc_control_v1.input_size)
+        im=sm.imresize(im,size,'nearest') # dur: 0.009
+        im=im[im.shape[0]/2, :]
+        # cv2.imshow('depth', im.reshape(1,im.shape[0])) # dur: 0.002
       # cv2.waitKey(2)
       im = im *1/255.*5. # dur: 0.00004
       return im
@@ -279,18 +291,24 @@ class PilotNode(object):
     # import pdb; pdb.set_trace()
     ### SEND CONTROL
     noise = self.exploration_noise.noise()
-    yaw = control[0,0]
-    if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
-      # yaw = max(-1,min(1,np.random.normal()))
-      yaw = max(-1,min(1,noise[3]))
+    # yaw = control[0,0]
+    # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
+    # yaw = max(-1,min(1,np.random.normal()))
     msg = Twist()
-    # msg.linear.x = FLAGS.speed * (1+noise[0]*0.2) #0.8 # 1.8 #
-    msg.linear.x = FLAGS.speed #0.8 # 1.8 #
-    msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.alpha
-    # msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
-    msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.alpha
-    # msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.alpha, FLAGS.alpha)
-    msg.angular.z = yaw
+    if FLAGS.type_of_noise == 'ou':
+      print('use ou noise')
+      msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
+      msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
+      msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
+      msg.angular.z = max(-1,min(1,control[0,0]+FLAGS.sigma_yaw*noise[3]))
+    elif FLAGS.type_of_noise == 'uni':
+      print('use uni noise')
+      msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
+      msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)
+      msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_z, FLAGS.sigma_z)
+      msg.angular.z = max(-1,min(1,control[0,0]+(not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_yaw, FLAGS.sigma_yaw)))
+    else:
+      raise IOError( 'Type of noise is unknown: {}'.format(FLAGS.type_of_noise))
     self.action_pub.publish(msg)
     self.time_6 = time.time()
     if FLAGS.show_depth and len(self.aux_depth) != 0 and not self.finished:
