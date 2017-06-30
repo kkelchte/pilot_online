@@ -176,10 +176,11 @@ class PilotNode(object):
       # 360*640*3
       #(rows,cols,channels) = cv2_img.shape
       #im = sm.imresize(cv2_img,(self.model.input_size, self.model.input_size, 3),'nearest')
-      if FLAGS.network == 'inception':
-        size = [inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
-      elif FLAGS.network == 'depth':
-        size = depth_estim.depth_estim_v1.input_size[1:]
+      # if FLAGS.network == 'inception':
+      #   size = [inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
+      # elif FLAGS.network == 'depth':
+      #   size = depth_estim.depth_estim_v1.input_size[1:]
+      size = self.model.input_size[1:]
       im = sm.imresize(im,tuple(size),'nearest')
       # im = im*1/255.
       # Basic preprocessing: center + make 1 standard deviation
@@ -201,11 +202,12 @@ class PilotNode(object):
       im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
       # Resize image
       if FLAGS.auxiliary_depth:
-        size = (55,74)
+        size = self.model.depth_input_size #(55,74)
         im=sm.imresize(im,size,'nearest') # dur: 0.002
         # cv2.imshow('depth', im) # dur: 0.002
       if FLAGS.depth_input:
-        size = (fc_control.fc_control_v1.input_size, fc_control.fc_control_v1.input_size)
+        # size = (fc_control.fc_control_v1.input_size, fc_control.fc_control_v1.input_size)
+        size = (self.model.input_size[1],self.model.input_size[1])
         im=sm.imresize(im,size,'nearest') # dur: 0.009
         im=im[im.shape[0]/2, :]
         # cv2.imshow('depth', im.reshape(1,im.shape[0])) # dur: 0.002

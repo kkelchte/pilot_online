@@ -17,6 +17,7 @@ import math
 from sklearn.manifold import TSNE
 
 import depth_estim
+import mobile_net
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -33,7 +34,7 @@ tf.app.flags.DEFINE_string("model_path", 'depth_net_checkpoint/checkpoint', "Spe
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '2017-04-23_1016_esat_cont_depth0420_1514', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
@@ -48,7 +49,7 @@ Build basic NN model
 """
 class Model(object):
  
-  def __init__(self,  session, input_size, output_size, prefix='model', device='/gpu:0', bound=1):
+  def __init__(self,  session, input_size, output_size, prefix='model', device='/gpu:0', bound=1, depth_input_size=(55,74)):
     '''initialize model
     '''
     self.sess = session
@@ -56,6 +57,7 @@ class Model(object):
     self.bound=bound
     self.input_size = input_size
     self.input_size[0] = None
+    self.depth_input_size = depth_input_size
     self.prefix = prefix
     self.device = device
     # self.writer = writer
@@ -70,7 +72,7 @@ class Model(object):
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
-    if not FLAGS.continue_training:
+    if not FLAGS.continue_training and not FLAGS.evaluate:
       if FLAGS.model_path[0]!='/':
         # checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.model_path
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.model_path)
@@ -87,6 +89,7 @@ class Model(object):
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
+      list_to_exclude.append("MobilenetV1/Logits")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
@@ -175,6 +178,14 @@ class Model(object):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
+      elif FLAGS.network=='mobile':
+        with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
+                             stddev=FLAGS.init_scale)):
+          #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
+          self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
+            is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+          self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
+          
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 
@@ -191,12 +202,11 @@ class Model(object):
           self.auxlogits = self.endpoints['fully_connected_1']
           self.controls, _ = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
           self.pred_depth = _['fully_connected_1']
-          if FLAGS.plot_histograms:
-            for v in tf.global_variables():
-              tf.summary.histogram(v.name.split(':')[0], v)
-          
       else:
         raise NameError( '[model] Network is unknown: ', FLAGS.network)
+      if FLAGS.plot_histograms:
+        for v in tf.global_variables():
+          tf.summary.histogram(v.name.split(':')[0], v)
       if(self.bound!=1 or self.bound!=0):
         # self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
         self.outputs = tf.multiply(self.outputs, self.bound) # Scale output to -bound to bound

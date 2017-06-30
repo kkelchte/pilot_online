@@ -17,6 +17,7 @@ from model import Model
 import rosinterface
 import inception
 import fc_control
+import mobile_net
 import depth_estim
 import sys, os, os.path
 import subprocess
@@ -56,8 +57,8 @@ tf.app.flags.DEFINE_float("action_bound", 1.0, "Define between what bounds the a
 tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacting with the real (bebop) drone.")
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
-tf.app.flags.DEFINE_string("network", 'depth', "Define the type of network: inception / fc_control / depth.")
-tf.app.flags.DEFINE_boolean("auxiliary_depth", True, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
+tf.app.flags.DEFINE_string("network", 'depth', "Define the type of network: inception / fc_control / depth / mobile.")
+tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 
 # ===========================
@@ -105,6 +106,8 @@ def main(_):
     state_dim = [1, fc_control.fc_control_v1.input_size]
   elif FLAGS.network =='depth':
     state_dim = depth_estim.depth_estim_v1.input_size
+  elif FLAGS.network =='mobile':
+    state_dim = [1, mobile_net.mobilenet_v1.default_image_size, mobile_net.mobilenet_v1.default_image_size, 3]  
   else:
     raise NameError( 'Network is unknown: ', FLAGS.network)
     
@@ -112,8 +115,8 @@ def main(_):
   
   print( "Number of State Dimensions:", state_dim)
   print( "Number of Action Dimensions:", action_dim)
-  print( "Action bound:", FLAGS.action_bound)\
-  
+  print( "Action bound:", FLAGS.action_bound)
+  # import pdb; pdb.set_trace()
   # tf.logging.set_verbosity(tf.logging.DEBUG)
   # inputs=random_ops.random_uniform(state_dim)
   # targets=random_ops.random_uniform((1,action_dim))
