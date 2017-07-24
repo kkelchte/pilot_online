@@ -101,14 +101,16 @@ class PilotNode(object):
       rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
       if rospy.has_param('control'):
         self.action_pub = rospy.Publisher(rospy.get_param('control'), Twist, queue_size=1)
+    ### TO BE CLEANED UP
+    if FLAGS.real:
+      self.action_pub=rospy.Publisher('/pilot_vel', Twist, queue_size=1)
+
     if rospy.has_param('ready'): 
       rospy.Subscriber(rospy.get_param('ready'), Empty, self.ready_callback)
     if rospy.has_param('finished'):
       rospy.Subscriber(rospy.get_param('finished'), Empty, self.finished_callback)
     if rospy.has_param('rgb_image') and not FLAGS.depth_input:
       rospy.Subscriber(rospy.get_param('rgb_image'), Image, self.image_callback)
-    if rospy.has_param('overtake'):
-      rospy.Subscriber(rospy.get_param('overtake'), Empty, self.overtake_callback)
     if rospy.has_param('depth_image'):
       if FLAGS.depth_input:        
         rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
@@ -132,11 +134,6 @@ class PilotNode(object):
       self.accumloss = 0
       rospy.Subscriber('/ground_truth/state', Odometry, self.gt_callback)
       
-  def overtake_callback(self, data):
-    if self.ready:
-      print('Neural control overtaken.')
-      self.finished = True
-      self.ready = False
       
   def ready_callback(self,msg):
     if not self.ready and self.finished:
