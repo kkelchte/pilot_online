@@ -56,7 +56,7 @@ tf.app.flags.DEFINE_string("type_of_noise", 'ou', "Define whether the noise is t
 tf.app.flags.DEFINE_float("sigma_z", 0.01, "sigma_z is the amount of noise in the z direction.")
 tf.app.flags.DEFINE_float("sigma_x", 0.01, "sigma_x is the amount of noise in the forward speed.")
 tf.app.flags.DEFINE_float("sigma_y", 0.01, "sigma_y is the amount of noise in the y direction.")
-tf.app.flags.DEFINE_float("sigma_yaw", 0.0, "sigma_yaw is the amount of noise added to the steering angle.")
+tf.app.flags.DEFINE_float("sigma_yaw", 0.1, "sigma_yaw is the amount of noise added to the steering angle.")
 tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
 
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
@@ -79,7 +79,8 @@ class PilotNode(object):
     self.logfolder = logfolder
     self.run=0
     self.maxy=-10
-    self.distance=0
+    self.current_distance=0
+    self.average_distance=0
     self.last_position=[]
     self.model = model
     self.ready=False 
@@ -148,15 +149,11 @@ class PilotNode(object):
     current_pos=[data.pose.pose.position.x,
                     data.pose.pose.position.y,
                     data.pose.pose.position.z]
-    #if self.last_position:
-      #self.distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
-    self.distance=max([self.distance, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
+    if len(self.last_position)!= 0:
+      self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
+    # self.current_distance=max([self.current_distance, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
     self.last_position=current_pos
-    #self.maxy=max([self.last_position[1], self.maxy])
-    
-    #if self.ready and not self.finished:
-      #time.sleep(0.5)
-    # print(self.distance)
+    # print(self.current_distance)
   
   def process_rgb(self, msg):
     # self.time_1 = time.time()
@@ -324,10 +321,11 @@ class PilotNode(object):
       else:
         self.replay_buffer.add(im,[trgt])
     self.time_7 = time.time()
-    if len(self.last_position)!=0 and self.ready and self.run:
-      self.runfile = open(self.logfolder+'/runs.txt', 'a')
-      self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-      self.runfile.close()
+    # DEPRECATED
+    # if len(self.last_position)!=0 and self.ready and self.run:
+    #   self.runfile = open(self.logfolder+'/runs.txt', 'a')
+    #   self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
+    #   self.runfile.close()
     if FLAGS.save_input: 
       self.depthfile = open(self.logfolder+'/depth_input', 'a')
       np.set_printoptions(precision=5)
@@ -349,9 +347,6 @@ class PilotNode(object):
 
   def supervised_callback(self, data):
     if not self.ready: return
-    # Klaas adjustment 05/06/2017
-    # if FLAGS.reloaded_by_ros and self.run<=3: return
-    # else:
     self.target_control = [data.linear.x,
       data.linear.y,
       data.linear.z,
@@ -411,8 +406,12 @@ class PilotNode(object):
         tloss = 0
         closs = 0
         dloss = 0
+      
+      self.average_distance = self.average_distance-self.average_distance/(self.run+1)
+      self.average_distance = self.average_distance+self.current_distance/(self.run+1)
+      
       try:
-        sumvar = [self.accumloss, self.distance, tloss, closs, dloss]
+        sumvar = [self.accumloss, self.current_distance, tloss, closs, dloss]
         if FLAGS.plot_activations and len(activation_images)!=0:
           sumvar.append(activation_images)
         if FLAGS.plot_depth and FLAGS.auxiliary_depth:
@@ -424,14 +423,14 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, distance: {3:0.3f}, total loss: {4:0.3f}, control loss: {5:0.3f}, depth loss: {6:0.3f}]'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.distance, tloss, closs, dloss))
+        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {4:0.3f}, control loss: {5:0.3f}, depth loss: {6:0.3f}]'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss))
       self.accumloss = 0
       self.maxy = -10
-      self.distance = 0
+      self.current_distance = 0
       self.last_position = []
       
-      if self.run%20==0 and not FLAGS.evaluate:
-        # Save a checkpoint every 100 runs.
+      if self.run%10==0 and not FLAGS.evaluate:
+        # Save a checkpoint every 20 runs.
         self.model.save(self.logfolder)
       
       self.run+=1 

@@ -89,7 +89,7 @@ class Model(object):
       if FLAGS.exclude_from_layer <= 5:
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
-      list_to_exclude.append("MobilenetV1/Logits")
+      list_to_exclude.append("MobilenetV1/control")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
@@ -100,7 +100,7 @@ class Model(object):
       #print list_to_exclude
       variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       # remap only in case of using Toms original network
-      if FLAGS.network == 'depth' and checkpoint_path == os.path.join(os.getenv('HOME'),'tensorflow/log','depth_net_checkpoint/checkpoint'):
+      if FLAGS.network == 'depth' and checkpoint_path == os.path.join(os.getenv('HOME'),'tensorflow/log','depth_net_checkpoint'):
         variables_to_restore = {
           'Conv/weights':slim.get_unique_variable('Depth_Estimate_V1/Conv/weights'),
           'Conv/biases':slim.get_unique_variable('Depth_Estimate_V1/Conv/biases'),
@@ -129,10 +129,6 @@ class Model(object):
           'fully_connected_1/weights':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/weights'),
           'fully_connected_1/biases':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/biases')
           }
-      if FLAGS.network == 'fc_control':
-        init_assign_op = None
-      else:
-        init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     else: #If continue training
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
@@ -141,9 +137,16 @@ class Model(object):
         # checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
-      print(checkpoint_path)
-      init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
     
+    if FLAGS.network == 'fc_control' and not FLAGS.continue_training:
+      init_assign_op = None
+    else:
+      # get latest folder out of training directory if there is no checkpoint file
+      if not os.path.isfile(checkpoint_path+'/checkpoint'):
+        checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
+        print('adjusted checkpoint path to: {}'.format(checkpoint_path))
+      init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
+  
     # create saver for checkpoints
     self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=5)
     
