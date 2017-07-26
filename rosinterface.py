@@ -77,6 +77,7 @@ class PilotNode(object):
 
     # Initialize replay memory
     self.logfolder = logfolder
+    self.logfile = logfolder+'/tensorflow_log'
     self.run=0
     self.maxy=-10
     self.current_distance=0
@@ -424,6 +425,12 @@ class PilotNode(object):
         pass
       else:
         print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {4:0.3f}, control loss: {5:0.3f}, depth loss: {6:0.3f}]'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss))
+        l_file = open(self.logfile,'a')
+        tag='train'
+        if FLAGS.evaluate:
+          tag='val'
+        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} \n'.format(self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, tag))
+        l_file.close()
       self.accumloss = 0
       self.maxy = -10
       self.current_distance = 0

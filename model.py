@@ -1,3 +1,4 @@
+
 import tensorflow as tf
 # import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
@@ -34,7 +35,7 @@ tf.app.flags.DEFINE_string("model_path", 'depth_net_checkpoint/checkpoint', "Spe
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
 tf.app.flags.DEFINE_string("checkpoint_path", '2017-04-23_1016_esat_cont_depth0420_1514', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
@@ -144,7 +145,8 @@ class Model(object):
       # get latest folder out of training directory if there is no checkpoint file
       if not os.path.isfile(checkpoint_path+'/checkpoint'):
         checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
-        print('adjusted checkpoint path to: {}'.format(checkpoint_path))
+        # print('adjusted checkpoint path to: {}'.format(checkpoint_path))
+      print('checkpoint: {}'.format(checkpoint_path))
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
   
     # create saver for checkpoints
