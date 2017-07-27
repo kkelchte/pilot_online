@@ -1,5 +1,6 @@
 
 import tensorflow as tf
+import os
 # import tensorflow.contrib.losses as losses
 import tensorflow.contrib.slim as slim
 #from tensorflow.contrib.slim.nets import inception
@@ -7,15 +8,14 @@ import inception
 import fc_control
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
-import os
-# import matplotlib
-# matplotlib.use('Agg')
-from matplotlib import pyplot as plt
+
+import matplotlib.pyplot as plt
+
+from sklearn.manifold import TSNE
 
 import numpy as np
 import math
 
-from sklearn.manifold import TSNE
 
 import depth_estim
 import mobile_net
@@ -61,28 +61,18 @@ class Model(object):
     self.depth_input_size = depth_input_size
     self.prefix = prefix
     self.device = device
-    # self.writer = writer
     self.lr = FLAGS.learning_rate 
-    #if FLAGS.initializer == 'xavier':
-      #self.initializer=tf.contrib.layers.xavier_initializer()
-    #else:
-      #self.initializer = tf.random_uniform_initializer(-init_scale, init_scale)
-    # need to catch variables to restore before defining the training op
-    # because adam variables are not available in check point.
-    # build network from SLIM model
+    
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
     if not FLAGS.continue_training and not FLAGS.evaluate:
       if FLAGS.model_path[0]!='/':
-        # checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.model_path
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.model_path)
         # checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.model_path
       else:
         checkpoint_path = FLAGS.model_path
-      list_to_exclude = []
-      list_to_exclude.append('global_step')
-
+      list_to_exclude = ["global_step"]
       if FLAGS.exclude_from_layer <= 7:
         list_to_exclude.extend(["InceptionV3/Mixed_7a", "InceptionV3/Mixed_7b", "InceptionV3/Mixed_7c"])
       if FLAGS.exclude_from_layer <= 6:
@@ -134,8 +124,6 @@ class Model(object):
       variables_to_restore = slim.get_variables_to_restore()
       if FLAGS.checkpoint_path[0]!='/':
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.checkpoint_path)
-        # checkpoint_path = '/esat/qayd/kkelchte/tensorflow/online_log/'+FLAGS.checkpoint_path
-        # checkpoint_path = '/home/klaas/tensorflow/log/'+FLAGS.checkpoint_path
       else:
         checkpoint_path = FLAGS.checkpoint_path
     
@@ -145,7 +133,6 @@ class Model(object):
       # get latest folder out of training directory if there is no checkpoint file
       if not os.path.isfile(checkpoint_path+'/checkpoint'):
         checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
-        # print('adjusted checkpoint path to: {}'.format(checkpoint_path))
       print('checkpoint: {}'.format(checkpoint_path))
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
   
@@ -189,8 +176,11 @@ class Model(object):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+
+          self.auxlogits = self.endpoints['aux_fully_connected_1']
           self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
-          
+          self.pred_depth = _['aux_fully_connected_1']
+
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 
@@ -227,7 +217,8 @@ class Model(object):
         # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
         self.weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32)
-        # self.depth_loss = losses.mean_squared_error(tf.clip_by_value(self.auxlogits,1e-10,1.0), tf.clip_by_value(self.depth_targets,1e-10,1.0), weights=self.weights)
+        # self.depth_loss = tf.losses.mean_squared_error(tf.clip_by_value(self.auxlogits,1e-10,1.0), tf.clip_by_value(self.depth_targets,1e-10,1.0), weights=self.weights)
+        
         self.depth_loss = tf.losses.mean_squared_error(self.auxlogits,self.depth_targets,weights=self.weights)
         # self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets, weights=0.0001)
       self.total_loss = tf.losses.get_total_loss()
@@ -300,6 +291,7 @@ class Model(object):
     results = self.sess.run(tensors, feed_dict=feed_dict)
     control = results[0] # control always first, and train_op second
     losses = results[2:] # rest is losses
+
     # import pdb; pdb.set_trace()
     # plt.subplot(1,2, 1)
     # plt.imshow(depth_targets[0])
@@ -308,7 +300,7 @@ class Model(object):
     # plt.show()
     # import pdb; pdb.set_trace()
     return control, losses
-
+  
   def get_endpoint_activations(self, inputs):
     '''Run forward through the network for this batch and return all activations
     of all intermediate endpoints
@@ -335,7 +327,7 @@ class Model(object):
     buf = buf[0::1,0::1, 0:3] #slice to make image 4x smaller and use only the R channel of RGBA
     #buf = np.resize(buf,(500,500,1))
     return buf
-  
+
   def plot_with_labels(self, low_d_weights, targets):
     assert low_d_weights.shape[0] >= len(targets), "More targets than weights"
     fig = plt.figure(figsize=(5,5))  #in inches
@@ -400,6 +392,7 @@ class Model(object):
 
   def plot_depth(self, inputs, depth_targets):
     '''plot depth predictions and return np array as floating image'''
+    if not FLAGS.auxiliary_depth: raise IOError('can t plot depth predictions when auxiliary depth is False.')
     control, depths = self.forward(inputs, aux=True)
     n=3
     fig = plt.figure(1, figsize=(5,5))
@@ -465,3 +458,6 @@ class Model(object):
       summary_str = self.sess.run(self.summary_ops, feed_dict=feed_dict)
       self.writer.add_summary(summary_str,  tf.train.global_step(self.sess, self.global_step))
       self.writer.flush()
+    
+  
+  

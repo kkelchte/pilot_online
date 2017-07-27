@@ -300,6 +300,17 @@ def mobilenet_v1(inputs,
                                           min_depth=min_depth,
                                           depth_multiplier=depth_multiplier,
                                           conv_defs=conv_defs)
+      
+      end_point = 'aux_fully_connected'
+      aux_logits=slim.fully_connected(net, 4096, tf.nn.relu)
+      end_points[end_point] = aux_logits
+      
+      end_point = 'aux_fully_connected_1'
+      aux_logits=slim.fully_connected(aux_logits, 55*74, tf.nn.relu)
+      # output height 55 width 74
+      aux_logits=tf.reshape(aux_logits, [-1, 55, 74])
+      end_points[end_point] = aux_logits
+      
       # adjust by me for training only final control layers
       # with tf.variable_scope('Logits'):
       with tf.variable_scope('control'):
