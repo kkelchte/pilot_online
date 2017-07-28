@@ -81,6 +81,7 @@ class Model(object):
         list_to_exclude.extend(["InceptionV3/Mixed_5a", "InceptionV3/Mixed_5b", "InceptionV3/Mixed_5c", "InceptionV3/Mixed_5d"])
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
       list_to_exclude.append("MobilenetV1/control")
+      list_to_exclude.append("MobilenetV1/aux_depth")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
