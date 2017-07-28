@@ -82,6 +82,7 @@ class PilotNode(object):
     self.maxy=-10
     self.current_distance=0
     self.average_distance=0
+    self.furthest_point=0
     self.last_position=[]
     self.model = model
     self.ready=False 
@@ -152,9 +153,9 @@ class PilotNode(object):
                     data.pose.pose.position.z]
     if len(self.last_position)!= 0:
       self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
-    # self.current_distance=max([self.current_distance, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
+    self.furthest_point=max([self.furthest_point, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
     self.last_position=current_pos
-    # print(self.current_distance)
+    # print(self.furthest_point)
   
   def process_rgb(self, msg):
     # self.time_1 = time.time()
@@ -412,7 +413,7 @@ class PilotNode(object):
       self.average_distance = self.average_distance+self.current_distance/(self.run+1)
       
       try:
-        sumvar = [self.accumloss, self.current_distance, tloss, closs, dloss]
+        sumvar = [self.accumloss, self.current_distance, tloss, closs, dloss, self.furthest_point]
         if FLAGS.plot_activations and len(activation_images)!=0:
           sumvar.append(activation_images)
         if FLAGS.plot_depth and FLAGS.auxiliary_depth:
@@ -424,17 +425,18 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {4:0.3f}, control loss: {5:0.3f}, depth loss: {6:0.3f}]'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss))
+        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, furthest point: {8:0.1f}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
           tag='val'
-        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} \n'.format(self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, tag))
+        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8}\n'.format(self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point, tag))
         l_file.close()
       self.accumloss = 0
       self.maxy = -10
       self.current_distance = 0
       self.last_position = []
+      self.furthest_point = 0
       
       if self.run%10==0 and not FLAGS.evaluate:
         # Save a checkpoint every 20 runs.

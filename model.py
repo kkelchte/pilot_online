@@ -432,6 +432,7 @@ class Model(object):
     self.add_summary_var("Loss_total")
     self.add_summary_var("Loss_control")
     self.add_summary_var("Loss_depth")
+    self.add_summary_var("Furthest_point")
 
     if FLAGS.plot_activations:
       act_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
