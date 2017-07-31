@@ -60,6 +60,7 @@ tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network withou
 tf.app.flags.DEFINE_string("network", 'depth', "Define the type of network: inception / fc_control / depth / mobile.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
+tf.app.flags.DEFINE_boolean("n_fc", False, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
 
 # ===========================
 #   Save settings

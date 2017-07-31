@@ -44,6 +44,7 @@ tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of 
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
+tf.app.flags.DEFINE_integer("n_frames", 1, "Specify the amount of frames concatenated in case of n_fc.")
 
 """
 Build basic NN model
@@ -174,6 +175,18 @@ class Model(object):
       elif FLAGS.network=='mobile':
         with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
+          if FLAGS.n_fc:
+            self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],self.input_size[1],self.input_size[2],FLAGS.n_frames*self.input_size[3]))
+            logits = []
+            # for i in range(FLAGS.n_frames):
+            #   _, endpoints = mobile_net.mobilenet_v1(self.inputs[:,:,:,i:i+3], num_classes=self.output_size, 
+            #     is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+            #   logits.append(endpoints['AvgPool_1a'])
+            logits=tf.reshape(np.concatenate(logits, axis=3), [-1, 1024*FLAGS.n_frames])
+            logits = slim.dropout(logits, keep_prob=dropout_keep_prob, scope='Dropout_1b')
+            logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+                                 normalizer_fn=None, scope='Conv2d_1c_1x1')
+            logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')  
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
