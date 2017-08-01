@@ -6,6 +6,10 @@ import tensorflow.contrib.slim as slim
 #from tensorflow.contrib.slim.nets import inception
 import inception
 import fc_control
+import nfc_control
+import depth_estim
+import mobile_net
+
 from tensorflow.contrib.slim import model_analyzer as ma
 from tensorflow.python.ops import variables as tf_variables
 
@@ -15,10 +19,6 @@ from sklearn.manifold import TSNE
 
 import numpy as np
 import math
-
-
-import depth_estim
-import mobile_net
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -44,6 +44,7 @@ tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of 
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
+
 tf.app.flags.DEFINE_integer("n_frames", 1, "Specify the amount of frames concatenated in case of n_fc.")
 
 """
@@ -129,7 +130,7 @@ class Model(object):
       else:
         checkpoint_path = FLAGS.checkpoint_path
     
-    if FLAGS.network == 'fc_control' and not FLAGS.continue_training:
+    if 'fc_control' in FLAGS.network and not FLAGS.continue_training:
       init_assign_op = None
     else:
       # get latest folder out of training directory if there is no checkpoint file
@@ -194,7 +195,6 @@ class Model(object):
           self.auxlogits = self.endpoints['aux_fully_connected_1']
           self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
           self.pred_depth = _['aux_fully_connected_1']
-
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 
@@ -202,8 +202,14 @@ class Model(object):
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
           self.controls, _ = fc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
             is_training=False, dropout_keep_prob=FLAGS.dropout_keep_prob, reuse=True)
-          if(self.bound!=1 or self.bound!=0):
-            self.outputs = tf.multiply(self.outputs, self.bound) # Scale output to -bound to bound
+      elif FLAGS.network == 'nfc_control': #in case of fc_control
+        self.inputs = tf.placeholder(tf.float32, shape = (None, self.input_size[1]*4))
+        with slim.arg_scope(nfc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
+                            stddev=FLAGS.init_scale)): 
+          self.outputs, self.endpoints = nfc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
+            is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+          self.controls, _ = nfc_control.fc_control_v1(self.inputs, num_classes=self.output_size, 
+            is_training=False, dropout_keep_prob=FLAGS.dropout_keep_prob, reuse=True)
       elif FLAGS.network=='depth':
         with slim.arg_scope(depth_estim.arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
           # Define model with SLIM, second returned value are endpoints to get activations of certain nodes

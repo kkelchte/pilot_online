@@ -17,6 +17,7 @@ from model import Model
 import rosinterface
 import inception
 import fc_control
+import nfc_control
 import mobile_net
 import depth_estim
 import sys, os, os.path
@@ -105,6 +106,8 @@ def main(_):
     state_dim = [1, inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
   elif FLAGS.network == 'fc_control':
     state_dim = [1, fc_control.fc_control_v1.input_size]
+  elif FLAGS.network == 'nfc_control':
+    state_dim = [1, nfc_control.fc_control_v1.input_size/4]
   elif FLAGS.network =='depth':
     state_dim = depth_estim.depth_estim_v1.input_size
   elif FLAGS.network =='mobile':

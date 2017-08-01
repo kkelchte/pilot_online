@@ -90,6 +90,7 @@ class PilotNode(object):
     self.target_control = []
     self.target_depth = []
     self.aux_depth = []
+    self.nfc_images =[]
     rospy.init_node('pilot', anonymous=True)
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
 
@@ -202,7 +203,6 @@ class PilotNode(object):
         im=sm.imresize(im,size,'nearest') # dur: 0.002
         # cv2.imshow('depth', im) # dur: 0.002
       if FLAGS.depth_input:
-        # size = (fc_control.fc_control_v1.input_size, fc_control.fc_control_v1.input_size)
         size = (self.model.input_size[1],self.model.input_size[1])
         im=sm.imresize(im,size,'nearest') # dur: 0.009
         im=im[im.shape[0]/2, :]
@@ -241,6 +241,16 @@ class PilotNode(object):
     im = self.process_depth(msg)
     if len(im)!=0: 
       if FLAGS.depth_input:
+        if FLAGS.network == 'nfc_control':
+          self.nfc_images.append(im)
+          if len(self.nfc_images)<4:
+            # print('filling concatenated frames: ',len(self.nfc_images))
+            return
+          else:
+            # print np.asarray(self.nfc_images).shape
+            im = np.concatenate(np.asarray(self.nfc_images))
+            # print im.shape
+            self.nfc_images.pop(0)
         self.process_input(im)
       if FLAGS.auxiliary_depth:
         self.target_depth = im #(64,)
@@ -284,7 +294,7 @@ class PilotNode(object):
       else: ### TRAINING WITH EXPERIENCE REPLAY
         # wait for first target depth in case of auxiliary depth.
         # in case the network can predict the depth
-        self.time_4 = time.time() 
+        self.time_4 = time.time()
         control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
         self.time_5 = time.time()
     # import pdb; pdb.set_trace()
