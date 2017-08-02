@@ -91,7 +91,7 @@ class PilotNode(object):
     self.target_control = []
     self.target_depth = []
     self.aux_depth = []
-    self.nfc_images =[]
+    self.nfc_images =[] #used by n_fc networks for building up concatenated frames
     rospy.init_node('pilot', anonymous=True)
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
 
@@ -172,14 +172,6 @@ class PilotNode(object):
       print(e)
     else:
       # self.time_2 = time.time()
-      #print('received image')
-      # 360*640*3
-      #(rows,cols,channels) = cv2_img.shape
-      #im = sm.imresize(cv2_img,(self.model.input_size, self.model.input_size, 3),'nearest')
-      # if FLAGS.network == 'inception':
-      #   size = [inception.inception_v3.default_image_size, inception.inception_v3.default_image_size, 3]
-      # elif FLAGS.network == 'depth':
-      #   size = depth_estim.depth_estim_v1.input_size[1:]
       size = self.model.input_size[1:]
       im = sm.imresize(im,tuple(size),'nearest')
       # im = im*1/255.
@@ -216,7 +208,17 @@ class PilotNode(object):
     
   def image_callback(self, msg):
     im = self.process_rgb(msg)
-    if len(im)!=0: self.process_input(im)
+    if len(im)!=0: 
+      if FLAGS.n_fc:
+        self.nfc_images.append(im)
+        if len(self.nfc_images) < FLAGS.n_frames:
+          print('filling concatenated frames: ',len(self.nfc_images))
+          return
+        else:
+          im = np.concatenate(np.asarray(self.nfc_images),axis=2)
+          print im.shape
+          self.nfc_images.pop(0)  
+      self.process_input(im)
 
   def image_callback_recovery(self, msg, args):
     im = self.process_rgb(msg)
@@ -299,6 +301,7 @@ class PilotNode(object):
         # in case the network can predict the depth
         self.time_4 = time.time()
         control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
+        # print('control: {}'.format(control))
         self.time_5 = time.time()
     # import pdb; pdb.set_trace()
     ### SEND CONTROL
@@ -336,16 +339,10 @@ class PilotNode(object):
       else:
         self.replay_buffer.add(im,[trgt])
     self.time_7 = time.time()
-    # DEPRECATED
-    # if len(self.last_position)!=0 and self.ready and self.run:
-    #   self.runfile = open(self.logfolder+'/runs.txt', 'a')
-    #   self.runfile.write('{0:05d} {1[0]:0.3f} {1[1]:0.3f} {1[2]:0.3f} \n'.format(self.run, self.last_position))
-    #   self.runfile.close()
     if FLAGS.save_input: 
       self.depthfile = open(self.logfolder+'/depth_input', 'a')
       np.set_printoptions(precision=5)
       message="{0} : {1} : {2:.4f} \n".format(self.run, ' '.join('{0:.5f}'.format(k) for k in np.asarray(im)), trgt)
-      # print('{}'.format(message))
       self.depthfile.write(message)
       self.depthfile.close()
     self.time_8 = time.time()
@@ -443,7 +440,8 @@ class PilotNode(object):
         tag='train'
         if FLAGS.evaluate:
           tag='val'
-        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(self.run, 
+        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(
+            self.run, 
           self.accumloss, 
           self.current_distance, 
           self.average_distance, 

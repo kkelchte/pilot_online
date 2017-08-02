@@ -20,6 +20,8 @@ from sklearn.manifold import TSNE
 import numpy as np
 import math
 
+
+
 FLAGS = tf.app.flags.FLAGS
 
 # Weight decay of inception network
@@ -30,22 +32,21 @@ tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
-tf.app.flags.DEFINE_string("model_path", 'depth_net_checkpoint', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
+tf.app.flags.DEFINE_string("model_path", 'mobilenet', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # tf.app.flags.DEFINE_string("model_path", '/users/visics/kkelchte/tensorflow/models', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # Define the initializer
 #tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-0.03, 0.03]")
-tf.app.flags.DEFINE_string("checkpoint_path", '2017-04-23_1016_esat_cont_depth0420_1514', "Specify the directory of the checkpoint of the earlier trained model.")
-tf.app.flags.DEFINE_boolean("continue_training", True, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
+tf.app.flags.DEFINE_string("checkpoint_path", 'mobilenet', "Specify the directory of the checkpoint of the earlier trained model.")
+tf.app.flags.DEFINE_boolean("continue_training", False, "Specify whether the training continues from a checkpoint or from a imagenet-pretrained model.")
 tf.app.flags.DEFINE_boolean("grad_mul", False, "Specify whether the weights of the final tanh activation should be learned faster.")
 tf.app.flags.DEFINE_boolean("freeze", False, "Specify whether feature extracting network should be frozen and only the logit scope should be trained.")
 tf.app.flags.DEFINE_integer("exclude_from_layer", 8, "In case of training from model (not continue_training), specify up untill which layer the weights are loaded: 5-6-7-8. Default 8: only leave out the logits and auxlogits.")
 tf.app.flags.DEFINE_boolean("plot_activations", False, "Specify whether the activations are weighted.")
 tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of dropout to keep the activation.")
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
-tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta. (!) Adam seems to be unstable as it lead to inf loss.")
+tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
 
-tf.app.flags.DEFINE_integer("n_frames", 1, "Specify the amount of frames concatenated in case of n_fc.")
 
 """
 Build basic NN model
@@ -84,6 +85,7 @@ class Model(object):
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
       list_to_exclude.append("MobilenetV1/control")
       list_to_exclude.append("MobilenetV1/aux_depth")
+      list_to_exclude.append("concatenated_control")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
@@ -178,23 +180,36 @@ class Model(object):
                              stddev=FLAGS.init_scale)):
           if FLAGS.n_fc:
             self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],self.input_size[1],self.input_size[2],FLAGS.n_frames*self.input_size[3]))
-            logits = []
-            # for i in range(FLAGS.n_frames):
-            #   _, endpoints = mobile_net.mobilenet_v1(self.inputs[:,:,:,i:i+3], num_classes=self.output_size, 
-            #     is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
-            #   logits.append(endpoints['AvgPool_1a'])
-            logits=tf.reshape(np.concatenate(logits, axis=3), [-1, 1024*FLAGS.n_frames])
-            logits = slim.dropout(logits, keep_prob=dropout_keep_prob, scope='Dropout_1b')
-            logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
-                                 normalizer_fn=None, scope='Conv2d_1c_1x1')
-            logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')  
-          #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-          self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
-            is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)
+            def feature_extract(is_training=True):
+              logits = []
+              for i in range(FLAGS.n_frames):
+                # print('i',i)
+                _, self.endpoints = mobile_net.mobilenet_v1(self.inputs[:,:,:,i*3:(i+1)*3], num_classes=self.output_size, 
+                  is_training=is_training, reuse= (i!=0 and is_training) or not is_training)
+                logits.append(self.endpoints['AvgPool_1a'])
+                # auxiliary depth prediction is each time overwritten so only last one is returned
+                # this is relevant for choosing the auxiliary target value!
+                aux_depth = self.endpoints['aux_fully_connected_1']
 
-          self.auxlogits = self.endpoints['aux_fully_connected_1']
-          self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
-          self.pred_depth = _['aux_fully_connected_1']
+              with tf.variable_scope('concatenated_control', reuse=not is_training): 
+                logits=tf.concat(logits, axis=3)
+                # logits=tf.reshape(np.concatenate(logits, axis=3), [-1, 1024*FLAGS.n_frames])
+                if is_training:
+                  logits = slim.dropout(logits, keep_prob=FLAGS.dropout_keep_prob, scope='Dropout_1b')
+                logits = slim.conv2d(logits, 1, [1, 1], activation_fn=None,
+                                     normalizer_fn=None, scope='Conv2d_1c_1x1')
+                outputs = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
+              return outputs, aux_depth
+            self.outputs, self.auxlogits = feature_extract(not FLAGS.evaluate)
+            self.controls, self.pred_depth = feature_extract(False)
+          else:  
+            #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
+            self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
+              is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob)
+            self.auxlogits = self.endpoints['aux_fully_connected_1']
+            self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
+            self.pred_depth = _['aux_fully_connected_1']
+      
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 

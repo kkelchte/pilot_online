@@ -304,14 +304,12 @@ def mobilenet_v1(inputs,
       net = slim.avg_pool2d(net, kernel_size, padding='VALID',
                             scope='AvgPool_1a')
       end_points['AvgPool_1a'] = net
+      net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
 
       with tf.variable_scope('aux_depth'):
-        end_point = 'prelogit'
-        prelogit = tf.reshape(net,[-1,1024])
-        end_points[end_point] = prelogit
-
         end_point = 'aux_fully_connected'
-        aux_logits=slim.fully_connected(prelogit, 4096, tf.nn.relu)
+        depth_aux_feat = tf.reshape(net,[-1,1024])
+        aux_logits=slim.fully_connected(depth_aux_feat, 4096, tf.nn.relu)
         end_points[end_point] = aux_logits
         
         end_point = 'aux_fully_connected_1'
@@ -322,14 +320,14 @@ def mobilenet_v1(inputs,
 
       with tf.variable_scope('control'): 
         # 1 x 1 x 1024
-        net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
         logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+        # logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=tf.tanh,
                              normalizer_fn=None, scope='Conv2d_1c_1x1')
         if spatial_squeeze:
           logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
-      end_points['Logits'] = logits
-      if prediction_fn:
-        end_points['Predictions'] = prediction_fn(logits, scope='Predictions')
+        end_points['Logits'] = logits
+      # if prediction_fn:
+      #   end_points['Predictions'] = prediction_fn(logits, scope='Predictions')
   return logits, end_points
 
 mobilenet_v1.default_image_size = 224

@@ -58,10 +58,11 @@ tf.app.flags.DEFINE_float("action_bound", 1.0, "Define between what bounds the a
 tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacting with the real (bebop) drone.")
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
-tf.app.flags.DEFINE_string("network", 'depth', "Define the type of network: inception / fc_control / depth / mobile.")
+tf.app.flags.DEFINE_string("network", 'mobile', "Define the type of network: inception / fc_control / depth / mobile.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether the horizontal line of depth is predicted as auxiliary task in the feature.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 tf.app.flags.DEFINE_boolean("n_fc", False, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
+tf.app.flags.DEFINE_integer("n_frames", 3, "Specify the amount of frames concatenated in case of n_fc.")
 
 # ===========================
 #   Save settings
@@ -134,27 +135,11 @@ def main(_):
   writer = tf.summary.FileWriter(summary_dir+FLAGS.log_tag, sess.graph)
   model.writer = writer
     
-  #model = None
   if FLAGS.launch_ros:
     rosinterface.launch()
   rosnode = rosinterface.PilotNode(model, summary_dir+FLAGS.log_tag)
-    
-  #def kill_callback(msg):
-    #global rosnode
-    #print("MAIN: dereferenced rosnode")
-    #rosnode = None
-    #time.sleep(6)
-    ##gzservercount=0
-    ##while gzservercount == 0:
-      ##gzservercount = os.popen("ps -Af").read().count('gzserver')
-      ##time.sleep(0.1)
-    #print ("MAIN: gzserver is relaunched!")
-    #rosnode = rosinterface.PilotNode(model, summary_dir+FLAGS.log_tag)
   
-  #rospy.Subscriber('/roskill', Empty, kill_callback)
-
-  # Random input from tensorflow (could be placeholder)
-  
+# Random input from tensorflow (could be placeholder)
   #for i in range(10):
     #inpt, trgt, dtrgt = sess.run([inputs, targets, depth_targets])
     ##print('input: ', inpt,' trgt: ',trgt,'dtrgt:', dtrgt)
@@ -179,6 +164,7 @@ def main(_):
     sys.exit(0)
   signal.signal(signal.SIGINT, signal_handler)
   print('------------Press Ctrl+C to end the learning')
+
   while True:
     try:
       sys.stdout.flush()
