@@ -140,7 +140,7 @@ class Model(object):
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
   
     # create saver for checkpoints
-    self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=5)
+    self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.5, max_to_keep=10)
     
     # Add the loss function to the graph.
     self.define_loss()

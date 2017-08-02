@@ -77,6 +77,7 @@ class PilotNode(object):
 
     # Initialize replay memory
     self.logfolder = logfolder
+    self.world_name = ''
     self.logfile = logfolder+'/tensorflow_log'
     self.run=0
     self.maxy=-10
@@ -146,6 +147,8 @@ class PilotNode(object):
       self.start_time = rospy.get_time()
       self.finished = False
       self.exploration_noise.reset()
+      if rospy.has_param('world_name') :
+        self.world_name = os.path.basename(rospy.get_param('world_name').split('.')[0])
     
   def gt_callback(self, data):
     if not self.ready: return
@@ -435,20 +438,26 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, furthest point: {8:0.1f}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point))
+        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, furthest point: {8:0.1f}, world: {9}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
           tag='val'
-        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8}\n'.format(self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point, tag))
+        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(self.run, 
+          self.accumloss, 
+          self.current_distance, 
+          self.average_distance, 
+          tloss, closs, dloss, 
+          self.furthest_point, tag, 
+          self.world_name))
         l_file.close()
       self.accumloss = 0
       self.maxy = -10
       self.current_distance = 0
       self.last_position = []
       self.furthest_point = 0
-      
-      if self.run%10==0 and not FLAGS.evaluate:
+      self.world_name = ''
+      if self.run%2==0 and not FLAGS.evaluate:
         # Save a checkpoint every 20 runs.
         self.model.save(self.logfolder)
       
