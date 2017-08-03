@@ -27,7 +27,7 @@ FLAGS = tf.app.flags.FLAGS
 # Weight decay of inception network
 tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception network")
 # Std of uniform initialization
-tf.app.flags.DEFINE_float("init_scale", 0.0027, "Std of uniform initialization")
+tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
@@ -69,6 +69,9 @@ class Model(object):
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
+    np.random.seed(FLAGS.random_seed)
+    tf.set_random_seed(FLAGS.random_seed)
+  
     if not FLAGS.continue_training and not FLAGS.evaluate:
       if FLAGS.model_path[0]!='/':
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.model_path)
@@ -85,7 +88,9 @@ class Model(object):
       list_to_exclude.extend(["InceptionV3/Logits", "InceptionV3/AuxLogits"])
       list_to_exclude.append("MobilenetV1/control")
       list_to_exclude.append("MobilenetV1/aux_depth")
-      list_to_exclude.append("concatenated_control")
+      list_to_exclude.append("concatenated_feature")
+      list_to_exclude.append("control")
+      list_to_exclude.append("aux_odom")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
@@ -176,7 +181,7 @@ class Model(object):
           self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
       elif FLAGS.network=='mobile':
-        with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
+        with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(is_training=True, weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
           if FLAGS.n_fc:
             self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],self.input_size[1],self.input_size[2],FLAGS.n_frames*self.input_size[3]))
@@ -191,15 +196,25 @@ class Model(object):
                 # this is relevant for choosing the auxiliary target value!
                 aux_depth = self.endpoints['aux_fully_connected_1']
 
-              with tf.variable_scope('concatenated_control', reuse=not is_training): 
+              with tf.variable_scope('concatenated_feature', reuse=not is_training): 
                 logits=tf.concat(logits, axis=3)
                 # logits=tf.reshape(np.concatenate(logits, axis=3), [-1, 1024*FLAGS.n_frames])
                 if is_training:
                   logits = slim.dropout(logits, keep_prob=FLAGS.dropout_keep_prob, scope='Dropout_1b')
+              with tf.variable_scope('aux_odom', reuse=not is_training):
+                self.prev_action=tf.placeholder(tf.float32, shape=(None, 1))
+                aux_input= tf.stack([logits,self.prev_action])
+                print(aux_input)  
+                aux_odom = slim.conv2d(aux_input, 50, [1, 1], activation_fn=tf.nn.relu6,
+                                     normalizer_fn=None, scope='Conv2d_aux_odom_1')
+                aux_odom = slim.conv2d(aux_odom, 4, [1, 1], activation_fn=None,
+                                     normalizer_fn=None, scope='Conv2d_aux_odom_2')                
+              with tf.variable_scope('control', reuse=not is_training):  
                 logits = slim.conv2d(logits, 1, [1, 1], activation_fn=None,
                                      normalizer_fn=None, scope='Conv2d_1c_1x1')
                 outputs = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
-              return outputs, aux_depth
+              
+              return outputs, aux_depth, aux_odom
             self.outputs, self.auxlogits = feature_extract(not FLAGS.evaluate)
             self.controls, self.pred_depth = feature_extract(False)
           else:  
@@ -210,6 +225,9 @@ class Model(object):
             self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
             self.pred_depth = _['aux_fully_connected_1']
       
+      
+
+
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 

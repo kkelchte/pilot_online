@@ -75,6 +75,9 @@ class PilotNode(object):
   def __init__(self, model, logfolder):
     print('initialize pilot node')
 
+    np.random.seed(FLAGS.random_seed)
+    tf.set_random_seed(FLAGS.random_seed)
+  
     # Initialize replay memory
     self.logfolder = logfolder
     self.world_name = ''
