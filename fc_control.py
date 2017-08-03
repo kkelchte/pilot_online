@@ -25,9 +25,9 @@ def fc_control_v1(inputs,
       net = slim.fully_connected(inputs, 100, activation_fn=tf.nn.relu, scope='layer1')
       end_points['Layer1'] = net
       net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
-      # logits = slim.fully_connected(net, num_classes, activation_fn=tf.tanh, scope='layer2')
-      logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
-                             normalizer_fn=None, scope='layer2')
+      logits = slim.fully_connected(net, num_classes, activation_fn=None, scope='layer2')
+      # logits = slim.conv2d(net, num_classes, [1, 1], activation_fn=None,
+                             # normalizer_fn=None, scope='layer2')
       end_points['Layer2'] = logits
         
   return logits, end_points
