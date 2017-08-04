@@ -61,6 +61,7 @@ tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrot
 
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
+tf.app.flags.DEFINE_boolean("show_odom",False,"Publish the predicted odometry on ./odom_prection so show_odom can visualize the estimated trajectory.")
 tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
 tf.app.flags.DEFINE_boolean("save_input",False,"Write depth input to file in order to check values later.")
 
@@ -84,6 +85,7 @@ class PilotNode(object):
     self.logfile = logfolder+'/tensorflow_log'
     self.run=0
     self.maxy=-10
+    self.accumlosses = {}
     self.current_distance=0
     self.average_distance=0
     self.furthest_point=0
@@ -93,14 +95,20 @@ class PilotNode(object):
     self.finished=True
     self.target_control = []
     self.target_depth = []
+    self.target_odom = []
     self.aux_depth = []
+    self.aux_odom = []
+    self.prev_control = [0]
     self.nfc_images =[] #used by n_fc networks for building up concatenated frames
+    self.nfc_positions =[] #used by n_fc networks for calculating odometry
     rospy.init_node('pilot', anonymous=True)
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
 
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
       self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
+    if FLAGS.show_odom:
+      self.odom_pub = rospy.Publisher('/odom_prediction', numpy_msg(Floats), queue_size=1)
     if FLAGS.off_policy:
       self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
       if rospy.has_param('control'):
@@ -157,7 +165,8 @@ class PilotNode(object):
     if not self.ready: return
     current_pos=[data.pose.pose.position.x,
                     data.pose.pose.position.y,
-                    data.pose.pose.position.z]
+                    data.pose.pose.position.z,
+                    data.pose.pose.orientation.z]
     if len(self.last_position)!= 0:
       self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
     self.furthest_point=max([self.furthest_point, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
@@ -214,13 +223,19 @@ class PilotNode(object):
     if len(im)!=0: 
       if FLAGS.n_fc:
         self.nfc_images.append(im)
+        self.nfc_positions.append(self.last_position)
         if len(self.nfc_images) < FLAGS.n_frames:
-          print('filling concatenated frames: ',len(self.nfc_images))
+          # print('filling concatenated frames: ',len(self.nfc_images))
           return
         else:
-          im = np.concatenate(np.asarray(self.nfc_images),axis=2)
-          print im.shape
-          self.nfc_images.pop(0)  
+          # concatenate last n-frames
+          im = np.concatenate(np.asarray(self.nfc_images[-FLAGS.n_frames:]),axis=2)
+          self.nfc_images = self.nfc_images[-FLAGS.n_frames+1:] # concatenate last n-1-frames
+
+          self.nfc_positions.pop(0) #get rid of the first one
+          assert len(self.nfc_positions) == 2
+          self.target_odom = [self.nfc_positions[1][i]-self.nfc_positions[0][i] for i in range(len(self.nfc_positions[0]))]
+           
       self.process_input(im)
 
   def image_callback_recovery(self, msg, args):
@@ -271,8 +286,41 @@ class PilotNode(object):
     self.time_3 = time.time()
     trgt = -100.
     # if self.target_control == None or FLAGS.evaluate:
+    prev_ctr = [[self.prev_control[0]]]
     if FLAGS.evaluate: ### EVALUATE
-      control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
+      trgt_depth = []
+      trgt_odom = []
+      with_loss = False
+      if len(self.target_control)!=0 and not FLAGS.auxiliary_depth and not FLAGS.auxiliary_odom: 
+        trgt_ctrl = [[self.target_control[5]]]
+        with_loss = True
+      elif len(self.target_control)!=0 and FLAGS.auxiliary_depth and len(self.target_depth)!=0 and not FLAGS.auxiliary_odom: 
+        trgt_ctrl = [[self.target_control[5]]]
+        trgt_depth = [copy.deepcopy(self.target_depth)]
+        with_loss = True
+      elif len(self.target_control)!=0 and not FLAGS.auxiliary_depth and FLAGS.auxiliary_odom and len(self.target_odom)!=0: 
+        trgt_ctrl = [[self.target_control[5]]]
+        trgt_odom = [copy.deepcopy(self.target_odom)]
+        with_loss = True
+      elif len(self.target_control)!=0 and FLAGS.auxiliary_depth and len(self.target_depth)!=0 and FLAGS.auxiliary_odom and len(self.target_odom)!=0: 
+        trgt_ctrl = [[self.target_control[5]]]
+        trgt_odom = [copy.deepcopy(self.target_odom)]
+        trgt_depth = [copy.deepcopy(self.target_depth)]
+        with_loss = True
+      if with_loss:
+        control, losses, aux_results = self.model.forward([im], 
+          auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, targets=trgt_ctrl, 
+          target_depth=trgt_depth, target_odom=trgt_odom, prev_action=prev_ctr)
+        if len(self.accumlosses.keys())==0: 
+          self.accumlosses = losses
+        else: 
+          # self.accumlosses=[self.accumlosses[i]+losses[i] for i in range(len(losses))]
+          for v in losses.keys(): self.accumlosses[v]=self.accumlosses[v]+losses[v]
+      else:
+        control, losses, aux_results = self.model.forward([im], auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
+      if FLAGS.show_depth and FLAGS.auxiliary_depth and len(aux_results)>0: self.aux_depth = aux_results.pop(0)
+      if FLAGS.show_odom and FLAGS.auxiliary_odom and len(aux_results)>0: self.aux_odom = aux_results.pop(0)
+    
     else: ###TRAINING
       # Get necessary labels, if label is missing wait...
       if len(self.target_control) == 0:
@@ -287,26 +335,34 @@ class PilotNode(object):
       else:
         trgt_depth = copy.deepcopy(self.target_depth)
         # self.target_depth = []
+      if FLAGS.auxiliary_odom and (len(self.target_odom) == 0 or len(self.prev_control) == 0):
+        print('no target odometry or previous control')
+        return
+      else:
+        trgt_odom = copy.deepcopy(self.target_odom)
       # check if depth image corresponds to rgb image
       # cv2.imshow('rgb', im)
       # cv2.waitKey(2)
       # cv2.imshow('depth', trgt_depth*1/5.)
       # cv2.waitKey(2)
-      if not FLAGS.experience_replay: ### TRAINING WITHOUT EXPERIENCE REPLAY 
-        if FLAGS.auxiliary_depth:
-          control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
-        else:
-          control, losses = self.model.backward([im],[[trgt]])
-        print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
-        self.accumloss += losses[0]
-      else: ### TRAINING WITH EXPERIENCE REPLAY
-        # wait for first target depth in case of auxiliary depth.
-        # in case the network can predict the depth
-        self.time_4 = time.time()
-        control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
-        # print('control: {}'.format(control))
-        self.time_5 = time.time()
-    # import pdb; pdb.set_trace()
+      # ---------------------------------------------------------- DEPRECATED
+      # if not FLAGS.experience_replay: ### TRAINING WITHOUT EXPERIENCE REPLAY 
+      #   if FLAGS.auxiliary_depth:
+      #     control, losses = self.model.backward([im],[[trgt]], [[[trgt_depth]]])
+      #   else:
+      #     control, losses = self.model.backward([im],[[trgt]])
+      #   print 'Difference: '+str(control[0,0])+' and '+str(trgt)+'='+str(abs(control[0,0]-trgt))
+      #   self.accumlosses += losses[0]
+      # else: ### TRAINING WITH EXPERIENCE REPLAY
+      # wait for first target depth in case of auxiliary depth.
+      # in case the network can predict the depth
+      self.time_4 = time.time()
+      # control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
+      control, losses, aux_results = self.model.forward([im], auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
+      if FLAGS.show_depth: self.aux_depth = aux_results.pop(0)
+      if FLAGS.show_odom: self.aux_odom = aux_results.pop(0)
+      self.time_5 = time.time()
+    
     ### SEND CONTROL
     noise = self.exploration_noise.noise()
     # yaw = control[0,0]
@@ -326,21 +382,27 @@ class PilotNode(object):
     else:
       raise IOError( 'Type of noise is unknown: {}'.format(FLAGS.type_of_noise))
     self.action_pub.publish(msg)
+    self.prev_control = [msg.angular.z]
     self.time_6 = time.time()
     if FLAGS.show_depth and len(self.aux_depth) != 0 and not self.finished:
       # print('shape aux depth: {}'.format(self.aux_depth.shape))
       self.aux_depth = self.aux_depth.flatten()
-      # self.ready=False
-      # import pdb; pdb.set_trace
       self.depth_pub.publish(self.aux_depth)
       self.aux_depth = []
-      # import pdb; pdb.set_trace()
+    if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished:
+      # print('shape aux odom: {}'.format(self.aux_odom.shape))
+      self.odom_pub.publish(self.aux_odom.flatten())
+      self.aux_odom = []
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
-      if FLAGS.auxiliary_depth:
-        self.replay_buffer.add(im,[trgt],[trgt_depth])
-      else:
-        self.replay_buffer.add(im,[trgt])
+      aux_info = {}
+      if FLAGS.auxiliary_depth: 
+        aux_info['target_depth']=trgt_depth
+      if FLAGS.auxiliary_odom: 
+        aux_info['target_odom']=trgt_odom
+        aux_info['prev_action']=prev_ctr
+      self.replay_buffer.add(im,[trgt],aux_info=aux_info)
+      
     self.time_7 = time.time()
     if FLAGS.save_input: 
       self.depthfile = open(self.logfolder+'/depth_input', 'a')
@@ -383,50 +445,55 @@ class PilotNode(object):
       tloss = [] #total loss
       closs = [] #control loss
       dloss = [] #depth loss
+      oloss = [] #odometry loss
       #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
-          #im_b, target_b = self.replay_buffer.sample_batch(FLAGS.batch_size)
-          batch = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          states, targets, aux_info = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
           if b==0:
             if FLAGS.plot_activations:
-              activation_images= self.model.plot_activations(batch[0], batch[1].reshape((-1,1)))
+              activation_images= self.model.plot_activations(states, targets.reshape((-1,1)))
             if FLAGS.plot_depth and FLAGS.auxiliary_depth:
-              depth_predictions = self.model.plot_depth(batch[0], batch[2][:].reshape(-1,55,74))
+              depth_predictions = self.model.plot_depth(states, aux_info['target_depth'].reshape(-1,55,74))
             if FLAGS.plot_histograms:
-              endpoint_activations = self.model.get_endpoint_activations(batch[0])
-          # if FLAGS.evaluate:
-          #   # shape control (16,1)
-          #   controls, loss = self.model.forward(batch[0],batch[1][:,0].reshape(-1,1))
-          #   losses = [loss, 0, 0]
-          # else:
-          if FLAGS.auxiliary_depth:
-            # controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,1,1,64))
-            # import pdb; pdb.set_trace()
-            controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1),batch[2][:].reshape(-1,55,74))
-          else:
-            controls, losses = self.model.backward(batch[0],batch[1][:].reshape(-1,1))
-          if len(losses) == 2: losses.append(0) #in case there is no depth
-          tloss.append(losses[0])
-          closs.append(losses[1])
-          dloss.append(losses[2])
-        tloss = np.mean(tloss)
-        closs = np.mean(closs)
-        dloss = np.mean(dloss)
-        #batch_loss = np.mean(tot_batch_loss)
-        
+              endpoint_activations = self.model.get_endpoint_activations(states)
+          depth_targets=[]
+          odom_targets=[]
+          prev_action=[]
+          if FLAGS.auxiliary_depth: depth_targets=aux_info['target_depth'].reshape(-1,55,74)  
+          if FLAGS.auxiliary_odom: 
+            odom_targets=aux_info['target_odom'].reshape(-1,4)
+            prev_action=aux_info['prev_action'].reshape(-1,1)
+          
+          controls, losses = self.model.backward(states,targets[:].reshape(-1,1), depth_targets, odom_targets, prev_action)
+          tloss = losses['t']
+          closs = losses['c']
+          if FLAGS.auxiliary_depth: dloss.append(losses['d'])
+          if FLAGS.auxiliary_odom: oloss.append(losses['o'])
+        tlossm = np.mean(tloss)
+        clossm = np.mean(closs)
+        dlossm = 0
+        olossm = 0
+        if FLAGS.auxiliary_depth: dlossm = np.mean(dloss)
+        if FLAGS.auxiliary_odom: olossm = np.mean(oloss)
       else:
-        print('filling buffer or no experience_replay: ', self.replay_buffer.size())
-        tloss = 0
-        closs = 0
-        dloss = 0
-      
+        print('Evaluating or filling buffer or no experience_replay: ', self.replay_buffer.size())
+        tlossm, clossm, dlossm, olossm = 0,0,0,0
+        # if len(self.accumlosses)>0: tlossm=self.accumlosses.pop(0)
+        # if len(self.accumlosses)>0: clossm=self.accumlosses.pop(0)
+        # if len(self.accumlosses)>0: dlossm=self.accumlosses.pop(0)
+        # if len(self.accumlosses)>0: olossm=self.accumlosses.pop(0)
+        if 't' in self.accumlosses.keys() : tlossm = self.accumlosses['t']
+        if 'c' in self.accumlosses.keys() : clossm = self.accumlosses['c']
+        if 'd' in self.accumlosses.keys() : dlossm = self.accumlosses['d']
+        if 'o' in self.accumlosses.keys() : olossm = self.accumlosses['o']
+
       self.average_distance = self.average_distance-self.average_distance/(self.run+1)
       self.average_distance = self.average_distance+self.current_distance/(self.run+1)
       
       try:
-        sumvar = [self.accumloss, self.current_distance, tloss, closs, dloss, self.furthest_point]
+        sumvar = [self.current_distance, self.average_distance, self.furthest_point, tlossm, clossm, dlossm, olossm]
         if FLAGS.plot_activations and len(activation_images)!=0:
           sumvar.append(activation_images)
         if FLAGS.plot_depth and FLAGS.auxiliary_depth:
@@ -438,24 +505,26 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, furthest point: {8:0.1f}, world: {9}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tloss, closs, dloss, self.furthest_point, self.world_name))
+        # print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, furthest point: {9:0.1f}, world: {10}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tlossm, clossm, dlossm, olossm, self.furthest_point, self.world_name))
+        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), self.run, self.current_distance, self.average_distance, self.furthest_point, tlossm, clossm, dlossm, olossm, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
           tag='val'
         l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(
             self.run, 
-          self.accumloss, 
           self.current_distance, 
           self.average_distance, 
-          tloss, closs, dloss, 
-          self.furthest_point, tag, 
+          self.furthest_point, 
+          tlossm, clossm, dlossm, olossm, tag, 
           self.world_name))
         l_file.close()
-      self.accumloss = 0
+      self.accumlosses = {}
       self.maxy = -10
       self.current_distance = 0
       self.last_position = []
+      self.nfc_images = []
+      self.nfc_positions = []
       self.furthest_point = 0
       self.world_name = ''
       if self.run%2==0 and not FLAGS.evaluate:

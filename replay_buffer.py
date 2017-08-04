@@ -25,10 +25,8 @@ class ReplayBuffer(object):
         random.seed(random_seed)
         # np.random.seed(random_seed)
 
-    def add(self, state, target, aux_target=None):
-        experience = (state, target)
-        if aux_target:
-            experience = (state, target, aux_target)
+    def add(self, state, target, aux_info={}):
+        experience = (state, target, aux_info)
         if self.count < self.buffer_size: 
             self.buffer.append(experience)
             self.count += 1
@@ -63,10 +61,11 @@ class ReplayBuffer(object):
         
         state_batch = np.array([_[0] for _ in batch])
         target_batch = np.array([_[1] for _ in batch])
-        aux_batch = None
-        if len(batch[0]) == 3:
-            aux_batch = np.array([_[2] for _ in batch])
-
+        
+        aux_batch = {}
+        for k in batch[0][2].keys():
+          aux_batch[k]=np.array([_[2][k] for _ in batch])
+        
         return state_batch, target_batch, aux_batch
 
     def clear(self):

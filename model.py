@@ -31,6 +31,7 @@ tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
+tf.app.flags.DEFINE_float("odom_weight", 0.01, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", 'mobilenet', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # tf.app.flags.DEFINE_string("model_path", '/users/visics/kkelchte/tensorflow/models', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
@@ -136,7 +137,8 @@ class Model(object):
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.checkpoint_path)
       else:
         checkpoint_path = FLAGS.checkpoint_path
-    
+    # import pdb; pdb.set_trace()
+
     if 'fc_control' in FLAGS.network and not FLAGS.continue_training:
       init_assign_op = None
     else:
@@ -178,13 +180,14 @@ class Model(object):
         with slim.arg_scope(inception.inception_v3_arg_scope(weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
-          self.outputs, self.endpoints, self.auxlogits = inception.inception_v3(self.inputs, num_classes=self.output_size, 
+          self.outputs, self.endpoints, self.auxdepth = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
       elif FLAGS.network=='mobile':
-        with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(is_training=True, weight_decay=FLAGS.weight_decay,
+        with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
           if FLAGS.n_fc:
             self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],self.input_size[1],self.input_size[2],FLAGS.n_frames*self.input_size[3]))
+            self.prev_action=tf.placeholder(tf.float32, shape=(None, 1))
             def feature_extract(is_training=True):
               logits = []
               for i in range(FLAGS.n_frames):
@@ -202,32 +205,25 @@ class Model(object):
                 if is_training:
                   logits = slim.dropout(logits, keep_prob=FLAGS.dropout_keep_prob, scope='Dropout_1b')
               with tf.variable_scope('aux_odom', reuse=not is_training):
-                self.prev_action=tf.placeholder(tf.float32, shape=(None, 1))
-                aux_input= tf.stack([logits,self.prev_action])
-                print(aux_input)  
-                aux_odom = slim.conv2d(aux_input, 50, [1, 1], activation_fn=tf.nn.relu6,
-                                     normalizer_fn=None, scope='Conv2d_aux_odom_1')
-                aux_odom = slim.conv2d(aux_odom, 4, [1, 1], activation_fn=None,
-                                     normalizer_fn=None, scope='Conv2d_aux_odom_2')                
+                aux_input = tf.concat([tf.squeeze(logits,[1,2]),self.prev_action], axis=1)
+                aux_odom = slim.fully_connected(aux_input, 50, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
+                aux_odom = slim.fully_connected(aux_odom, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
               with tf.variable_scope('control', reuse=not is_training):  
                 logits = slim.conv2d(logits, 1, [1, 1], activation_fn=None,
                                      normalizer_fn=None, scope='Conv2d_1c_1x1')
                 outputs = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
               
               return outputs, aux_depth, aux_odom
-            self.outputs, self.auxlogits = feature_extract(not FLAGS.evaluate)
-            self.controls, self.pred_depth = feature_extract(False)
-          else:  
+            self.outputs, self.aux_depth, self.aux_odom = feature_extract(True)
+            self.controls, self.pred_depth, self.pred_odom = feature_extract(False)
+          else:
+            if FLAGS.auxiliary_odom : raise IOError('Odometry cant be predicted when there is no n_fc')  
             #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
             self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
               is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob)
-            self.auxlogits = self.endpoints['aux_fully_connected_1']
+            self.aux_depth = self.endpoints['aux_fully_connected_1']
             self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
             self.pred_depth = _['aux_fully_connected_1']
-      
-      
-
-
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                             stddev=FLAGS.init_scale)): 
@@ -247,7 +243,7 @@ class Model(object):
         with slim.arg_scope(depth_estim.arg_scope(weight_decay=FLAGS.weight_decay, stddev=FLAGS.init_scale)):
           # Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=True)
-          self.auxlogits = self.endpoints['fully_connected_1']
+          self.aux_depth = self.endpoints['fully_connected_1']
           self.controls, _ = depth_estim.depth_estim_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
           self.pred_depth = _['fully_connected_1']
       else:
@@ -269,11 +265,12 @@ class Model(object):
       if FLAGS.auxiliary_depth:
         # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
-        self.weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32)
-        # self.depth_loss = tf.losses.mean_squared_error(tf.clip_by_value(self.auxlogits,1e-10,1.0), tf.clip_by_value(self.depth_targets,1e-10,1.0), weights=self.weights)
-        
-        self.depth_loss = tf.losses.mean_squared_error(self.auxlogits,self.depth_targets,weights=self.weights)
-        # self.depth_loss = losses.mean_squared_error(self.auxlogits, self.depth_targets, weights=0.0001)
+        weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32) # put loss weight on zero where depth is negative.        
+        self.depth_loss = tf.losses.mean_squared_error(self.aux_depth,self.depth_targets,weights=weights)
+        # self.depth_loss = losses.mean_squared_error(self.aux_depth, self.depth_targets, weights=0.0001)
+      if FLAGS.auxiliary_odom:
+        self.odom_targets = tf.placeholder(tf.float32, [None,4])
+        self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
       self.total_loss = tf.losses.get_total_loss()
       
   def define_train(self):
@@ -307,44 +304,62 @@ class Model(object):
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
       # self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers, global_step=self.global_step)
         
-  def forward(self, inputs, aux=False, targets=[], depth_targets=[]):
+  def forward(self, inputs, auxdepth=False, auxodom=False, prev_action=[], targets=[], target_depth=[], target_odom=[]):
     '''run forward pass and return action prediction
     '''
     tensors = [self.controls]
     feed_dict={self.inputs: inputs}
-    if aux: tensors.append(self.pred_depth)
+    if auxdepth: tensors.append(self.pred_depth)
+    if auxodom:
+      if len(prev_action)==0: raise IOError('previous action was not provided to model.forward.') 
+      tensors.append(self.pred_odom)
+      feed_dict[self.prev_action] = prev_action
+    
     if len(targets) != 0: 
       tensors.extend([self.total_loss, self.loss])
       feed_dict[self.targets] = targets
-    if len(depth_targets) != 0: 
+    if len(target_depth) != 0: 
       tensors.append(self.depth_loss)
-      feed_dict[self.depth_targets] = depth_targets
+      feed_dict[self.depth_targets] = target_depth
+    if len(target_odom) != 0: 
+      tensors.append(self.odom_loss)
+      feed_dict[self.odom_targets] = target_odom
+    
     results = self.sess.run(tensors, feed_dict=feed_dict)
-    losses = []
+    losses = {}
+    aux_results = []
     control = results.pop(0)
-    if aux: auxdepth = results.pop(0)
+    if auxdepth: aux_results.append(results.pop(0))
+    if auxodom: aux_results.append(results.pop(0))
     if len(targets)!=0:
-      losses.append(results.pop(0)) # total loss
-      losses.append(results.pop(0)) # control loss
-    if len(depth_targets) != 0:
-      losses.append(results.pop(0)) # depth loss
-    if aux:
-      if len(losses)==0: return control, auxdepth
-      else: return control, losses, auxdepth
-    else: return control, losses
+      losses['t']=results.pop(0) # total loss
+      losses['c']=results.pop(0) # control loss
+    if len(target_depth) != 0:
+      losses['d']=results.pop(0) # depth loss
+    if len(target_odom) != 0:
+      losses['o']=results.pop(0) # odometry loss
+    return control, losses, aux_results
 
-  def backward(self, inputs, targets, depth_targets=[]):
+  def backward(self, inputs, targets, depth_targets=[], odom_targets=[], prev_action=[]):
     '''run forward pass and return action prediction
     '''
     tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
     feed_dict = {self.inputs: inputs, self.targets: targets}
-    if FLAGS.auxiliary_depth and len(depth_targets)!=0: 
+    if FLAGS.auxiliary_depth and len(depth_targets)!=0:
       tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = depth_targets
+    if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0:
+      tensors.append(self.odom_loss)
+      feed_dict[self.odom_targets] = odom_targets 
+      feed_dict[self.prev_action] = prev_action 
     results = self.sess.run(tensors, feed_dict=feed_dict)
-    control = results[0] # control always first, and train_op second
-    losses = results[2:] # rest is losses
-
+    control = results.pop(0) # control always first
+    _ = results.pop(0) # and train_op second
+    losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
+    if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
+    if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0: losses['o']=results.pop(0)
+    
+    
     # import pdb; pdb.set_trace()
     # plt.subplot(1,2, 1)
     # plt.imshow(depth_targets[0])
@@ -479,12 +494,13 @@ class Model(object):
   
   def build_summaries(self): 
     self.summary_vars = []
-    self.add_summary_var("Episode_loss")
-    self.add_summary_var("Distance")
+    self.add_summary_var("Distance_current")
+    self.add_summary_var("Distance_average")
+    self.add_summary_var("Distance_furthest")
     self.add_summary_var("Loss_total")
     self.add_summary_var("Loss_control")
     self.add_summary_var("Loss_depth")
-    self.add_summary_var("Furthest_point")
+    self.add_summary_var("Loss_odom")
 
     if FLAGS.plot_activations:
       act_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
