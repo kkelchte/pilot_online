@@ -58,6 +58,7 @@ tf.app.flags.DEFINE_float("sigma_x", 0.01, "sigma_x is the amount of noise in th
 tf.app.flags.DEFINE_float("sigma_y", 0.01, "sigma_y is the amount of noise in the y direction.")
 tf.app.flags.DEFINE_float("sigma_yaw", 0.1, "sigma_yaw is the amount of noise added to the steering angle.")
 tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrotor.")
+tf.app.flags.DEFINE_float("alpha",0.,"Policy mixing: choose with a binomial chance of alpha for the experts policy.")
 
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
 tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
@@ -368,17 +369,21 @@ class PilotNode(object):
     # yaw = control[0,0]
     # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
     # yaw = max(-1,min(1,np.random.normal()))
+    if trgt != 100:
+      action = trgt if np.random.binomial(1,FLAGS.alpha) else control[0,0]
+    else:
+      action = control[0,0]
     msg = Twist()
     if FLAGS.type_of_noise == 'ou':
       msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
       msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
       msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
-      msg.angular.z = max(-1,min(1,control[0,0]+FLAGS.sigma_yaw*noise[3]))
+      msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
     elif FLAGS.type_of_noise == 'uni':
       msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)
       msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_z, FLAGS.sigma_z)
-      msg.angular.z = max(-1,min(1,control[0,0]+(not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_yaw, FLAGS.sigma_yaw)))
+      msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_yaw, FLAGS.sigma_yaw)))
     else:
       raise IOError( 'Type of noise is unknown: {}'.format(FLAGS.type_of_noise))
     self.action_pub.publish(msg)
