@@ -270,7 +270,8 @@ class Model(object):
         # self.depth_loss = losses.mean_squared_error(self.aux_depth, self.depth_targets, weights=0.0001)
       if FLAGS.auxiliary_odom:
         self.odom_targets = tf.placeholder(tf.float32, [None,4])
-        self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        self.odom_loss = tf.losses.absolute_difference(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        # self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
       self.total_loss = tf.losses.get_total_loss()
       
   def define_train(self):
@@ -490,41 +491,62 @@ class Model(object):
   def add_summary_var(self, name):
     var_name = tf.Variable(0.)
     tf.summary.scalar(name, var_name)
-    self.summary_vars.append(var_name)
+    self.summary_vars[name]=var_name
+    # self.summary_vars.append(var_name)
   
   def build_summaries(self): 
-    self.summary_vars = []
+    self.summary_vars = {}
+    # self.summary_vars = []
     self.add_summary_var("Distance_current")
-    self.add_summary_var("Distance_average")
+    self.add_summary_var("Distance_current_sandbox")
+    self.add_summary_var("Distance_current_forest")
+    self.add_summary_var("Distance_current_canyon")
+    self.add_summary_var("Distance_current_esat_corridor_v1")
+    self.add_summary_var("Distance_current_esat_corridor_v2")
     self.add_summary_var("Distance_furthest")
+    self.add_summary_var("Distance_furthest_sandbox")
+    self.add_summary_var("Distance_furthest_forest")
+    self.add_summary_var("Distance_furthest_canyon")
+    self.add_summary_var("Distance_furthest_esat_corridor_v1")
+    self.add_summary_var("Distance_furthest_esat_corridor_v2")
+    self.add_summary_var("Distance_average")
+    self.add_summary_var("Distance_average_eva")
     self.add_summary_var("Loss_total")
     self.add_summary_var("Loss_control")
     self.add_summary_var("Loss_depth")
     self.add_summary_var("Loss_odom")
+    self.add_summary_var("odom_errx")
+    self.add_summary_var("odom_erry")
+    self.add_summary_var("odom_errz")
+    self.add_summary_var("odom_erryaw")
 
     if FLAGS.plot_activations:
       act_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
       tf.summary.image("conv_activations", act_images, max_outputs=4)
-      self.summary_vars.append(act_images)
+      self.summary_vars["conv_activations"]=act_images
+      # self.summary_vars.append(act_images)
     
     if FLAGS.auxiliary_depth and FLAGS.plot_depth:
       dep_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
       tf.summary.image("depth_predictions", dep_images, max_outputs=4)
-      self.summary_vars.append(dep_images)
+      self.summary_vars["depth_predictions"]=dep_images
+      # self.summary_vars.append(dep_images)
 
     activations={}
     if FLAGS.plot_histograms:
       for ep in self.endpoints: # add activations to summary
         activations[ep]=tf.placeholder(tf.float32,[None, 1])
         tf.summary.histogram('activations_{}'.format(ep), activations[ep])
-        self.summary_vars.append(activations[ep])
+        self.summary_vars['activations_{}'.format(ep)]=activations[ep]
+        # self.summary_vars.append(activations[ep])
 
     self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, sumvars):
     '''write summary vars with ops'''
     if self.writer:
-      feed_dict={self.summary_vars[i]:sumvars[i] for i in range(len(sumvars))}
+      feed_dict={self.summary_vars[key]:sumvars[key] for key in sumvars.keys()}
+      # feed_dict={self.summary_vars[i]:sumvars[i] for i in range(len(sumvars))}
       summary_str = self.sess.run(self.summary_ops, feed_dict=feed_dict)
       self.writer.add_summary(summary_str,  tf.train.global_step(self.sess, self.global_step))
       self.writer.flush()

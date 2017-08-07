@@ -88,8 +88,9 @@ class PilotNode(object):
     self.maxy=-10
     self.accumlosses = {}
     self.current_distance=0
-    self.average_distance=0
     self.furthest_point=0
+    self.average_distance=0
+    self.average_distance_eva=0
     self.last_position=[]
     self.model = model
     self.ready=False 
@@ -99,6 +100,7 @@ class PilotNode(object):
     self.target_odom = []
     self.aux_depth = []
     self.aux_odom = []
+    self.odom_error = []
     self.prev_control = [0]
     self.nfc_images =[] #used by n_fc networks for building up concatenated frames
     self.nfc_positions =[] #used by n_fc networks for calculating odometry
@@ -159,8 +161,13 @@ class PilotNode(object):
       self.start_time = rospy.get_time()
       self.finished = False
       self.exploration_noise.reset()
+      if rospy.has_param('evaluate') :
+        FLAGS.evaluate = rospy.get_param('evaluate')
+
+    
       if rospy.has_param('world_name') :
         self.world_name = os.path.basename(rospy.get_param('world_name').split('.')[0])
+        if 'sandbox' in self.world_name: self.world_name='sandbox'
     
   def gt_callback(self, data):
     if not self.ready: return
@@ -169,8 +176,9 @@ class PilotNode(object):
                     data.pose.pose.position.z,
                     data.pose.pose.orientation.z]
     if len(self.last_position)!= 0:
-      self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
+        self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
     self.furthest_point=max([self.furthest_point, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
+      
     self.last_position=current_pos
     # print(self.furthest_point)
   
@@ -224,7 +232,7 @@ class PilotNode(object):
     if len(im)!=0: 
       if FLAGS.n_fc:
         self.nfc_images.append(im)
-        self.nfc_positions.append(self.last_position)
+        self.nfc_positions.append(self.last_position[:])
         if len(self.nfc_images) < FLAGS.n_frames:
           # print('filling concatenated frames: ',len(self.nfc_images))
           return
@@ -236,7 +244,7 @@ class PilotNode(object):
           self.nfc_positions.pop(0) #get rid of the first one
           assert len(self.nfc_positions) == 2
           self.target_odom = [self.nfc_positions[1][i]-self.nfc_positions[0][i] for i in range(len(self.nfc_positions[0]))]
-           
+          # print 'Target odometry: ', self.target_odom 
       self.process_input(im)
 
   def image_callback_recovery(self, msg, args):
@@ -394,10 +402,14 @@ class PilotNode(object):
       self.aux_depth = self.aux_depth.flatten()
       self.depth_pub.publish(self.aux_depth)
       self.aux_depth = []
-    if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished:
-      # print('shape aux odom: {}'.format(self.aux_odom.shape))
-      self.odom_pub.publish(self.aux_odom.flatten())
+    if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished and len(trgt_odom)!=0:
+      concat_odoms=np.concatenate((self.aux_odom.flatten(), np.array(trgt_odom).flatten()))
+      # self.odom_pub.publish(self.aux_odom.flatten())
+      # print concat_odoms, type(concat_odoms[0])
+      self.odom_pub.publish(concat_odoms.astype(np.float32))
+      self.odom_error.append(np.abs(np.array(trgt_odom).flatten()-self.aux_odom.flatten()))
       self.aux_odom = []
+      
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
       aux_info = {}
@@ -485,33 +497,58 @@ class PilotNode(object):
       else:
         print('Evaluating or filling buffer or no experience_replay: ', self.replay_buffer.size())
         tlossm, clossm, dlossm, olossm = 0,0,0,0
-        # if len(self.accumlosses)>0: tlossm=self.accumlosses.pop(0)
-        # if len(self.accumlosses)>0: clossm=self.accumlosses.pop(0)
-        # if len(self.accumlosses)>0: dlossm=self.accumlosses.pop(0)
-        # if len(self.accumlosses)>0: olossm=self.accumlosses.pop(0)
         if 't' in self.accumlosses.keys() : tlossm = self.accumlosses['t']
         if 'c' in self.accumlosses.keys() : clossm = self.accumlosses['c']
         if 'd' in self.accumlosses.keys() : dlossm = self.accumlosses['d']
         if 'o' in self.accumlosses.keys() : olossm = self.accumlosses['o']
 
-      self.average_distance = self.average_distance-self.average_distance/(self.run+1)
-      self.average_distance = self.average_distance+self.current_distance/(self.run+1)
+      if not FLAGS.evaluate:
+        self.average_distance = self.average_distance-self.average_distance/(self.run+1)
+        self.average_distance = self.average_distance+self.current_distance/(self.run+1)
+      else:
+        self.average_distance_eva = self.average_distance_eva-self.average_distance_eva/(self.run+1)
+        self.average_distance_eva = self.average_distance_eva+self.current_distance/(self.run+1)
       
+      odom_errx, odom_erry, odom_errz, odom_erryaw = 0,0,0,0
+      if len(self.odom_error) != 0:
+        odom_errx=np.mean([e[0] for e in self.odom_error])
+        odom_erry=np.mean([e[1] for e in self.odom_error])
+        odom_errz=np.mean([e[2] for e in self.odom_error])
+        odom_erryaw=np.mean([e[3] for e in self.odom_error])
       try:
-        sumvar = [self.current_distance, self.average_distance, self.furthest_point, tlossm, clossm, dlossm, olossm]
+        sumvar={k : 0 for k in self.model.summary_vars.keys()}
+        sumvar["Distance_current_"+self.world_name if len(self.world_name)!=0 else "Distance_current"]=self.current_distance
+        sumvar["Distance_furthest_"+self.world_name if len(self.world_name)!=0 else "Distance_furthest"]=self.furthest_point
+        if FLAGS.evaluate:
+          sumvar["Distance_average_eva"]=self.average_distance_eva
+        else:
+          sumvar["Distance_average"]=self.average_distance
+        sumvar["Loss_total"]=tlossm
+        sumvar["Loss_control"]=clossm 
+        sumvar["Loss_depth"]=dlossm 
+        sumvar["Loss_odom"]=olossm 
+        sumvar["odom_errx"]=odom_errx 
+        sumvar["odom_erry"]=odom_erry 
+        sumvar["odom_errz"]=odom_errz 
+        sumvar["odom_erryaw"]=odom_erryaw
         if FLAGS.plot_activations and len(activation_images)!=0:
-          sumvar.append(activation_images)
+          sumvar["conv_activations"]=activation_images
+          # sumvar.append(activation_images)
         if FLAGS.plot_depth and FLAGS.auxiliary_depth:
-          sumvar.append(depth_predictions)
+          sumvar["depth_predictions"]=depth_predictions
+          # sumvar.append(depth_predictions)
         if FLAGS.plot_histograms:
-          sumvar.extend(endpoint_activations)
+          for i, ep in enumerate(self.model.endpoints):
+            sumvar['activations_{}'.format(ep)]=endpoint_activations[i]
+          # sumvar.extend(endpoint_activations)
         self.model.summarize(sumvar)
       except Exception as e:
         print('failed to write', e)
         pass
       else:
-        # print('{0}: control finished {1}:[ acc loss: {2:0.3f}, current_distance: {3:0.3f}, average_distance: {4:0.3f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, furthest point: {9:0.1f}, world: {10}'.format(time.strftime('%H:%M'), self.run, self.accumloss, self.current_distance, self.average_distance, tlossm, clossm, dlossm, olossm, self.furthest_point, self.world_name))
-        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), self.run, self.current_distance, self.average_distance, self.furthest_point, tlossm, clossm, dlossm, olossm, self.world_name))
+        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), 
+          self.run, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
+          self.furthest_point, tlossm, clossm, dlossm, olossm, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
@@ -519,7 +556,7 @@ class PilotNode(object):
         l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(
             self.run, 
           self.current_distance, 
-          self.average_distance, 
+          self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
           self.furthest_point, 
           tlossm, clossm, dlossm, olossm, tag, 
           self.world_name))
@@ -532,7 +569,7 @@ class PilotNode(object):
       self.nfc_positions = []
       self.furthest_point = 0
       self.world_name = ''
-      if self.run%2==0 and not FLAGS.evaluate:
+      if self.run%10==0 and not FLAGS.evaluate:
         # Save a checkpoint every 20 runs.
         self.model.save(self.logfolder)
       
