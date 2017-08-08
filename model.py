@@ -490,12 +490,12 @@ class Model(object):
 
   def add_summary_var(self, name):
     var_name = tf.Variable(0.)
-    tf.summary.scalar(name, var_name)
     self.summary_vars[name]=var_name
-    # self.summary_vars.append(var_name)
-  
+    self.summary_ops[name] = tf.summary.scalar(name, var_name)
+    
   def build_summaries(self): 
     self.summary_vars = {}
+    self.summary_ops = {}
     # self.summary_vars = []
     self.add_summary_var("Distance_current")
     self.add_summary_var("Distance_current_sandbox")
@@ -515,39 +515,44 @@ class Model(object):
     self.add_summary_var("Loss_control")
     self.add_summary_var("Loss_depth")
     self.add_summary_var("Loss_odom")
+    self.add_summary_var("Loss_total_eva")
+    self.add_summary_var("Loss_control_eva")
+    self.add_summary_var("Loss_depth_eva")
+    self.add_summary_var("Loss_odom_eva")
     self.add_summary_var("odom_errx")
     self.add_summary_var("odom_erry")
     self.add_summary_var("odom_errz")
     self.add_summary_var("odom_erryaw")
 
     if FLAGS.plot_activations:
+      name = "conv_activations"
       act_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
-      tf.summary.image("conv_activations", act_images, max_outputs=4)
-      self.summary_vars["conv_activations"]=act_images
-      # self.summary_vars.append(act_images)
-    
+      self.summary_vars[name]=act_images
+      self.summary_ops[name]=tf.summary.image(name, act_images, max_outputs=4)
+      
     if FLAGS.auxiliary_depth and FLAGS.plot_depth:
+      name="depth_predictions"
       dep_images = tf.placeholder(tf.float32, [None, 500, 500, 3])
-      tf.summary.image("depth_predictions", dep_images, max_outputs=4)
-      self.summary_vars["depth_predictions"]=dep_images
-      # self.summary_vars.append(dep_images)
-
+      self.summary_vars[name]=dep_images
+      self.summary_ops[name]=tf.summary.image(name, dep_images, max_outputs=4)
+    
     activations={}
     if FLAGS.plot_histograms:
       for ep in self.endpoints: # add activations to summary
+        name='activations_{}'.format(ep)
         activations[ep]=tf.placeholder(tf.float32,[None, 1])
-        tf.summary.histogram('activations_{}'.format(ep), activations[ep])
-        self.summary_vars['activations_{}'.format(ep)]=activations[ep]
-        # self.summary_vars.append(activations[ep])
-
-    self.summary_ops = tf.summary.merge_all()
+        self.summary_vars[name]=activations[ep]
+        self.summary_ops[name]=tf.summary.histogram(name, activations[ep])
+        
+    # self.summary_ops = tf.summary.merge_all()
 
   def summarize(self, sumvars):
     '''write summary vars with ops'''
     if self.writer:
       feed_dict={self.summary_vars[key]:sumvars[key] for key in sumvars.keys()}
       # feed_dict={self.summary_vars[i]:sumvars[i] for i in range(len(sumvars))}
-      summary_str = self.sess.run(self.summary_ops, feed_dict=feed_dict)
+      sum_op = tf.summary.merge([self.summary_ops[key] for key in sumvars.keys()])
+      summary_str = self.sess.run(sum_op, feed_dict=feed_dict)
       self.writer.add_summary(summary_str,  tf.train.global_step(self.sess, self.global_step))
       self.writer.flush()
     

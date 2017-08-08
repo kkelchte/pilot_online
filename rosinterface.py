@@ -463,6 +463,7 @@ class PilotNode(object):
       closs = [] #control loss
       dloss = [] #depth loss
       oloss = [] #odometry loss
+      tlossm, clossm, dlossm, olossm, tlossm_eva, clossm_eva, dlossm_eva, olossm_eva = 0,0,0,0,0,0,0,0
       #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
@@ -496,11 +497,10 @@ class PilotNode(object):
         if FLAGS.auxiliary_odom: olossm = np.mean(oloss)
       else:
         print('Evaluating or filling buffer or no experience_replay: ', self.replay_buffer.size())
-        tlossm, clossm, dlossm, olossm = 0,0,0,0
-        if 't' in self.accumlosses.keys() : tlossm = self.accumlosses['t']
-        if 'c' in self.accumlosses.keys() : clossm = self.accumlosses['c']
-        if 'd' in self.accumlosses.keys() : dlossm = self.accumlosses['d']
-        if 'o' in self.accumlosses.keys() : olossm = self.accumlosses['o']
+        if 't' in self.accumlosses.keys() : tlossm_eva = self.accumlosses['t']
+        if 'c' in self.accumlosses.keys() : clossm_eva = self.accumlosses['c']
+        if 'd' in self.accumlosses.keys() : dlossm_eva = self.accumlosses['d']
+        if 'o' in self.accumlosses.keys() : olossm_eva = self.accumlosses['o']
 
       if not FLAGS.evaluate:
         self.average_distance = self.average_distance-self.average_distance/(self.run+1)
@@ -516,21 +516,26 @@ class PilotNode(object):
         odom_errz=np.mean([e[2] for e in self.odom_error])
         odom_erryaw=np.mean([e[3] for e in self.odom_error])
       try:
-        sumvar={k : 0 for k in self.model.summary_vars.keys()}
+        sumvar={}
+        # sumvar={k : 0 for k in self.model.summary_vars.keys()}
         sumvar["Distance_current_"+self.world_name if len(self.world_name)!=0 else "Distance_current"]=self.current_distance
         sumvar["Distance_furthest_"+self.world_name if len(self.world_name)!=0 else "Distance_furthest"]=self.furthest_point
         if FLAGS.evaluate:
           sumvar["Distance_average_eva"]=self.average_distance_eva
         else:
           sumvar["Distance_average"]=self.average_distance
-        sumvar["Loss_total"]=tlossm
-        sumvar["Loss_control"]=clossm 
-        sumvar["Loss_depth"]=dlossm 
-        sumvar["Loss_odom"]=olossm 
-        sumvar["odom_errx"]=odom_errx 
-        sumvar["odom_erry"]=odom_erry 
-        sumvar["odom_errz"]=odom_errz 
-        sumvar["odom_erryaw"]=odom_erryaw
+        if tlossm != 0 : sumvar["Loss_total"]=tlossm
+        if clossm != 0 : sumvar["Loss_control"]=clossm 
+        if dlossm != 0 : sumvar["Loss_depth"]=dlossm 
+        if olossm != 0 : sumvar["Loss_odom"]=olossm 
+        if tlossm_eva != 0 : sumvar["Loss_total_eva"]=tlossm_eva
+        if clossm_eva != 0 : sumvar["Loss_control_eva"]=clossm_eva 
+        if dlossm_eva != 0 : sumvar["Loss_depth_eva"]=dlossm_eva 
+        if olossm_eva != 0 : sumvar["Loss_odom_eva"]=olossm_eva 
+        if odom_errx != 0 : sumvar["odom_errx"]=odom_errx 
+        if odom_erry != 0 : sumvar["odom_erry"]=odom_erry 
+        if odom_errz != 0 : sumvar["odom_errz"]=odom_errz 
+        if odom_erryaw != 0 : sumvar["odom_erryaw"]=odom_erryaw
         if FLAGS.plot_activations and len(activation_images)!=0:
           sumvar["conv_activations"]=activation_images
           # sumvar.append(activation_images)
