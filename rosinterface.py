@@ -581,7 +581,7 @@ class PilotNode(object):
       
       if not FLAGS.evaluate:
         self.run+=1  
-      else 
+      else :
         self.run_eva+=1
       # wait for gzserver to be killed
       gzservercount=1
