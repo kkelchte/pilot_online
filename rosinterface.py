@@ -85,6 +85,7 @@ class PilotNode(object):
     self.world_name = ''
     self.logfile = logfolder+'/tensorflow_log'
     self.run=0
+    self.run_eva=0
     self.maxy=-10
     self.accumlosses = {}
     self.current_distance=0
@@ -506,8 +507,8 @@ class PilotNode(object):
         self.average_distance = self.average_distance-self.average_distance/(self.run+1)
         self.average_distance = self.average_distance+self.current_distance/(self.run+1)
       else:
-        self.average_distance_eva = self.average_distance_eva-self.average_distance_eva/(self.run+1)
-        self.average_distance_eva = self.average_distance_eva+self.current_distance/(self.run+1)
+        self.average_distance_eva = self.average_distance_eva-self.average_distance_eva/(self.run_eva+1)
+        self.average_distance_eva = self.average_distance_eva+self.current_distance/(self.run_eva+1)
       
       odom_errx, odom_erry, odom_errz, odom_erryaw = 0,0,0,0
       if len(self.odom_error) != 0:
@@ -552,14 +553,14 @@ class PilotNode(object):
         pass
       else:
         print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), 
-          self.run, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
+          self.run if not FLAGS.evaluate else self.run_eva, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
           self.furthest_point, tlossm, clossm, dlossm, olossm, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
           tag='val'
         l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(
-            self.run, 
+            self.run if not FLAGS.evaluate else self.run_eva, 
           self.current_distance, 
           self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
           self.furthest_point, 
@@ -578,7 +579,10 @@ class PilotNode(object):
         # Save a checkpoint every 20 runs.
         self.model.save(self.logfolder)
       
-      self.run+=1 
+      if not FLAGS.evaluate:
+        self.run+=1  
+      else 
+        self.run_eva+=1
       # wait for gzserver to be killed
       gzservercount=1
       while gzservercount > 0:
