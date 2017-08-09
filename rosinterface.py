@@ -410,16 +410,13 @@ class PilotNode(object):
       self.aux_depth = []
     if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished and len(trgt_odom)!=0:
       # debug odom by checking image + odometry correspondences:
-      
-      # fig = plt.figure(figsize=(10, 10))
-      # plt.subplot(311)
-      # plt.imshow(im[:,:,0:2])
-      # plt.subplot(312)
-      # plt.imshow(im[:,:,3:6])
-      # plt.subplot(312)
-      # plt.imshow(im[:,:,7:])
-      # plt.show()
+      # final_img = cv2.hconcat((im[:,:,0:3], im[:,:,3:6],im[:,:,6:]))
+      # final_img = cv2.hconcat((im[:,:,[2,1,0]], im[:,:,[5,4,3]],im[:,:,[8,7,6]]))
       # print trgt_odom
+      # cv2.imshow('Final', final_img)      
+      # cv2.waitKey(100)
+      # cv2.destroyAllWindows()        
+
 
       concat_odoms=np.concatenate((self.aux_odom.astype(np.float32).flatten(), np.array(trgt_odom).astype(np.float32).flatten()))
       # self.odom_pub.publish(self.aux_odom.flatten())

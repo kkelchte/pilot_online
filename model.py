@@ -47,6 +47,9 @@ tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of 
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
+tf.app.flags.DEFINE_boolean("feed_previous_action", True, "Feed previous action as concatenated feature for odom prediction layers.")
+tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidden units in the odometry decision layer.")
+tf.app.flags.DEFINE_string("odom_loss", 'absolute_difference', "absolute_difference or mean_squared")
 
 
 """
@@ -205,8 +208,11 @@ class Model(object):
                 if is_training:
                   logits = slim.dropout(logits, keep_prob=FLAGS.dropout_keep_prob, scope='Dropout_1b')
               with tf.variable_scope('aux_odom', reuse=not is_training):
-                aux_input = tf.concat([tf.squeeze(logits,[1,2]),self.prev_action], axis=1)
-                aux_odom = slim.fully_connected(aux_input, 50, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
+                if FLAGS.feed_previous_action:
+                  aux_input = tf.concat([tf.squeeze(logits,[1,2]),self.prev_action], axis=1)
+                else :
+                  aux_input = tf.squeeze(logits, [1,2])
+                aux_odom = slim.fully_connected(aux_input, FLAGS.odom_hidden_units, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
                 aux_odom = slim.fully_connected(aux_odom, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
               with tf.variable_scope('control', reuse=not is_training):  
                 logits = slim.conv2d(logits, 1, [1, 1], activation_fn=None,
@@ -270,8 +276,12 @@ class Model(object):
         # self.depth_loss = losses.mean_squared_error(self.aux_depth, self.depth_targets, weights=0.0001)
       if FLAGS.auxiliary_odom:
         self.odom_targets = tf.placeholder(tf.float32, [None,4])
-        self.odom_loss = tf.losses.absolute_difference(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
-        # self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        if FLAGS.odom_loss == 'absolute_difference':
+          self.odom_loss = tf.losses.absolute_difference(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        elif FLAGS.odom_loss == 'mean_squared':
+          self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        else :
+          raise 'Odom loss is unknown: {}'.format(FLAGS.odom_loss)
       self.total_loss = tf.losses.get_total_loss()
       
   def define_train(self):
