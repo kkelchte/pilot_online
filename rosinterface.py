@@ -14,6 +14,11 @@ bridge = CvBridge()
 
 from replay_buffer import ReplayBuffer
 
+# Debug odometry
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+
+
 #from pygazebo import images_stamped_pb2 as gzimages
 
 
@@ -404,9 +409,12 @@ class PilotNode(object):
       self.depth_pub.publish(self.aux_depth)
       self.aux_depth = []
     if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished and len(trgt_odom)!=0:
-      concat_odoms=np.concatenate((self.aux_odom.flatten(), np.array(trgt_odom).flatten()))
+      # debug odom by checking image + odometry correspondences:
+
+
+      concat_odoms=np.concatenate((self.aux_odom.astype(np.float32).flatten(), np.array(trgt_odom).astype(np.float32).flatten()))
       # self.odom_pub.publish(self.aux_odom.flatten())
-      # print concat_odoms, type(concat_odoms[0])
+      # print concat_odoms[4:6],' and ',concat_odoms[0:2]
       self.odom_pub.publish(concat_odoms.astype(np.float32))
       self.odom_error.append(np.abs(np.array(trgt_odom).flatten()-self.aux_odom.flatten()))
       self.aux_odom = []
@@ -466,7 +474,7 @@ class PilotNode(object):
       oloss = [] #odometry loss
       tlossm, clossm, dlossm, olossm, tlossm_eva, clossm_eva, dlossm_eva, olossm_eva = 0,0,0,0,0,0,0,0
       #tot_batch_loss = []
-      if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size:
+      if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size and not FLAGS.evaluate:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
           states, targets, aux_info = self.replay_buffer.sample_batch(FLAGS.batch_size)
           #print('time to smaple batch of images: ',time.time()-st)
@@ -554,7 +562,7 @@ class PilotNode(object):
       else:
         print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), 
           self.run if not FLAGS.evaluate else self.run_eva, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
-          self.furthest_point, tlossm, clossm, dlossm, olossm, self.world_name))
+          self.furthest_point, tlossm if not FLAGS.evaluate else tlossm_eva, clossm if not FLAGS.evaluate else clossm_eva, dlossm if not FLAGS.evaluate else dlossm_eva, olossm if not FLAGS.evaluate else olossm_eva, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
@@ -564,7 +572,11 @@ class PilotNode(object):
           self.current_distance, 
           self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
           self.furthest_point, 
-          tlossm, clossm, dlossm, olossm, tag, 
+          tlossm,
+          clossm,
+          dlossm,
+          olossm,
+          tag,
           self.world_name))
         l_file.close()
       self.accumlosses = {}
