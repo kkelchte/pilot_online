@@ -305,10 +305,10 @@ def mobilenet_v1(inputs,
                             scope='AvgPool_1a')
       end_points['AvgPool_1a'] = net
       net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
-
+      # print( str(net))
       with tf.variable_scope('aux_depth'):
         end_point = 'aux_fully_connected'
-        depth_aux_feat = tf.reshape(net,[-1,1024])
+        depth_aux_feat = tf.reshape(net,[-1,256]) if depth_multiplier==0.25 else tf.reshape(net,[-1,1024])
         aux_logits=slim.fully_connected(depth_aux_feat, 4096, tf.nn.relu)
         end_points[end_point] = aux_logits
         
@@ -331,6 +331,7 @@ def mobilenet_v1(inputs,
   return logits, end_points
 
 mobilenet_v1.default_image_size = 224
+mobilenet_v1.default_image_size_small = 128
 
 
 def _reduced_kernel_size_for_small_input(input_tensor, kernel_size):

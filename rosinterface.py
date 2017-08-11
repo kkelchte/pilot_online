@@ -248,7 +248,7 @@ class PilotNode(object):
           self.nfc_images = self.nfc_images[-FLAGS.n_frames+1:] # concatenate last n-1-frames
 
           self.nfc_positions.pop(0) #get rid of the first one
-          assert len(self.nfc_positions) == 2
+          assert len(self.nfc_positions) == FLAGS.n_frames-1
           self.target_odom = [self.nfc_positions[1][i]-self.nfc_positions[0][i] for i in range(len(self.nfc_positions[0]))]
           # print 'Target odometry: ', self.target_odom 
       self.process_input(im)
@@ -301,7 +301,6 @@ class PilotNode(object):
     self.time_3 = time.time()
     trgt = -100.
     # if self.target_control == None or FLAGS.evaluate:
-    prev_ctr = [[self.prev_control[0]]]
     if FLAGS.evaluate: ### EVALUATE
       trgt_depth = []
       trgt_odom = []
@@ -323,15 +322,17 @@ class PilotNode(object):
         trgt_depth = [copy.deepcopy(self.target_depth)]
         with_loss = True
       if with_loss:
+        prev_ctr = [[self.prev_control[0]]]
         control, losses, aux_results = self.model.forward([im], 
-          auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, targets=trgt_ctrl, 
-          target_depth=trgt_depth, target_odom=trgt_odom, prev_action=prev_ctr)
+          auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr, targets=trgt_ctrl, 
+          target_depth=trgt_depth, target_odom=trgt_odom)
         if len(self.accumlosses.keys())==0: 
           self.accumlosses = losses
         else: 
           # self.accumlosses=[self.accumlosses[i]+losses[i] for i in range(len(losses))]
           for v in losses.keys(): self.accumlosses[v]=self.accumlosses[v]+losses[v]
       else:
+        prev_ctr = [[self.prev_control[0]]]
         control, losses, aux_results = self.model.forward([im], auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
       if FLAGS.show_depth and FLAGS.auxiliary_depth and len(aux_results)>0: self.aux_depth = aux_results.pop(0)
       if FLAGS.show_odom and FLAGS.auxiliary_odom and len(aux_results)>0: self.aux_odom = aux_results.pop(0)
@@ -443,6 +444,8 @@ class PilotNode(object):
       self.depthfile.write(message)
       self.depthfile.close()
     self.time_8 = time.time()
+    # print 'processed image @: {0:.2f}'.format(time.time())
+    
     # print("Time debugging: \n cvbridge: {0} , \n resize: {1}, \n copy: {2} , \n net pred: {3}, \n pub: {4},\n exp buf: {5},\n pos file: {6} s".format((self.time_2-self.time_1),
       # (self.time_3-self.time_2),(self.time_4-self.time_3),(self.time_5-self.time_4),(self.time_6-self.time_5),(self.time_7-self.time_6),(self.time_8-self.time_7)))
     # Delay values with auxiliary depth (at the beginning of training)

@@ -30,6 +30,7 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception ne
 tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
+tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
 tf.app.flags.DEFINE_float("odom_weight", 0.01, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
@@ -68,14 +69,18 @@ class Model(object):
     self.depth_input_size = depth_input_size
     self.prefix = prefix
     self.device = device
-    self.lr = FLAGS.learning_rate 
-    
+
+    np.random.seed(FLAGS.random_seed)
+    tf.set_random_seed(FLAGS.random_seed)
+    if FLAGS.random_learning_rate:
+      self.lr = 10**np.random.uniform(-4,0)
+    else:
+      self.lr = FLAGS.learning_rate 
+    print 'learning rate: ', self.lr    
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
     
-    np.random.seed(FLAGS.random_seed)
-    tf.set_random_seed(FLAGS.random_seed)
-  
+    
     if not FLAGS.continue_training and not FLAGS.evaluate:
       if FLAGS.model_path[0]!='/':
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.model_path)
@@ -185,7 +190,8 @@ class Model(object):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints, self.auxdepth = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
-      elif FLAGS.network=='mobile':
+      elif FLAGS.network=='mobile' or FLAGS.network=='mobile_small':
+        depth_multiplier = 0.25 if FLAGS.network=='mobile_small' else 1
         with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
           if FLAGS.n_fc:
@@ -196,7 +202,7 @@ class Model(object):
               for i in range(FLAGS.n_frames):
                 # print('i',i)
                 _, self.endpoints = mobile_net.mobilenet_v1(self.inputs[:,:,:,i*3:(i+1)*3], num_classes=self.output_size, 
-                  is_training=is_training, reuse= (i!=0 and is_training) or not is_training)
+                  is_training=is_training, reuse= (i!=0 and is_training) or not is_training, depth_multiplier=depth_multiplier)
                 logits.append(self.endpoints['AvgPool_1a'])
                 # auxiliary depth prediction is each time overwritten so only last one is returned
                 # this is relevant for choosing the auxiliary target value!
@@ -226,9 +232,10 @@ class Model(object):
             if FLAGS.auxiliary_odom : raise IOError('Odometry cant be predicted when there is no n_fc')  
             #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
             self.outputs, self.endpoints = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
-              is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob)
+              is_training=True, dropout_keep_prob=FLAGS.dropout_keep_prob, depth_multiplier=depth_multiplier)
             self.aux_depth = self.endpoints['aux_fully_connected_1']
-            self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, is_training=False, reuse = True)
+            self.controls, _ = mobile_net.mobilenet_v1(self.inputs, num_classes=self.output_size, 
+              is_training=False, reuse = True, depth_multiplier=depth_multiplier)
             self.pred_depth = _['aux_fully_connected_1']
       elif FLAGS.network == 'fc_control': #in case of fc_control
         with slim.arg_scope(fc_control.fc_control_v1_arg_scope(weight_decay=FLAGS.weight_decay,
