@@ -233,10 +233,13 @@ class Model(object):
               # self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],None,self.input_size[1],self.input_size[2],self.input_size[3]))
               with tf.variable_scope("lstm_control", reuse=not is_training):
                 def lstm():
-                  lstm_cell = tf.nn.rnn_cell.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
-                  lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
+                  lstm_cell = tf.contrib.rnn.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
+                  # lstm_cell = tf.nn.rnn_cell.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
+                  lstm_cell = tf.contrib.rnn.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
+                  # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
                   return lstm_cell
-                cell = tf.nn.rnn_cell.MultiRNNCell([lstm(), lstm()])
+                cell = tf.contrib.rnn.MultiRNNCell([lstm(), lstm()])
+                # cell = tf.nn.rnn_cell.MultiRNNCell([lstm(), lstm()])
                 initial_state = cell.zero_state(FLAGS.batch_size if is_training else 1, tf.float32)
                 # state = self.init_state = tf.placeholder(tf.float32, shape = (FLAGS.batch_size if is_training else 1, 2*2*FLAGS.lstm_hiddensize))
                 state = initial_state
