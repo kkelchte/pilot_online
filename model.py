@@ -52,7 +52,6 @@ tf.app.flags.DEFINE_boolean("feed_previous_action", True, "Feed previous action 
 tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidden units in the odometry decision layer.")
 tf.app.flags.DEFINE_string("odom_loss", 'absolute_difference', "absolute_difference or mean_squared")
 
-
 """
 Build basic NN model
 """
@@ -100,6 +99,7 @@ class Model(object):
       list_to_exclude.append("concatenated_feature")
       list_to_exclude.append("control")
       list_to_exclude.append("aux_odom")
+      list_to_exclude.append("lstm_control")
 
       if FLAGS.network == 'depth':
         # control layers are not in pretrained depth checkpoint
@@ -207,7 +207,6 @@ class Model(object):
                 # auxiliary depth prediction is each time overwritten so only last one is returned
                 # this is relevant for choosing the auxiliary target value!
                 aux_depth = self.endpoints['aux_fully_connected_1']
-
               with tf.variable_scope('concatenated_feature', reuse=not is_training): 
                 logits=tf.concat(logits, axis=3)
                 # logits=tf.reshape(np.concatenate(logits, axis=3), [-1, 1024*FLAGS.n_frames])
@@ -224,10 +223,52 @@ class Model(object):
                 logits = slim.conv2d(logits, 1, [1, 1], activation_fn=None,
                                      normalizer_fn=None, scope='Conv2d_1c_1x1')
                 outputs = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
-              
               return outputs, aux_depth, aux_odom
             self.outputs, self.aux_depth, self.aux_odom = feature_extract(True)
             self.controls, self.pred_depth, self.pred_odom = feature_extract(False)
+          elif FLAGS.lstm:
+            def define_lstm(is_training=True, inputs_ph=[]):
+              # define and CNN+LSTM with mobilenet
+              # returns the lstm cell, a batch of outputs, a list of batches of depth predictions for all timesteps
+              # self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],None,self.input_size[1],self.input_size[2],self.input_size[3]))
+              with tf.variable_scope("lstm_control", reuse=not is_training):
+                def lstm():
+                  lstm_cell = tf.nn.rnn_cell.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
+                  lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
+                  return lstm_cell
+                cell = tf.nn.rnn_cell.MultiRNNCell([lstm(), lstm()])
+                initial_state = cell.zero_state(FLAGS.batch_size if is_training else 1, tf.float32)
+                # state = self.init_state = tf.placeholder(tf.float32, shape = (FLAGS.batch_size if is_training else 1, 2*2*FLAGS.lstm_hiddensize))
+                state = initial_state
+                outputs = []
+                # states = []
+                aux_depths = []
+                for time_step in range(FLAGS.num_steps if is_training else 1):
+                  _, endpoints = mobile_net.mobilenet_v1(inputs_ph[:,time_step,:,:], num_classes=self.output_size, 
+                    is_training=is_training, reuse=(time_step!=0 and is_training) or not is_training,
+                    dropout_keep_prob=FLAGS.dropout_keep_prob, depth_multiplier=depth_multiplier)
+                  aux_depths.append(endpoints['aux_fully_connected_1'])
+                  (output, state) = cell(tf.reshape(endpoints['AvgPool_1a'], (FLAGS.batch_size if is_training else 1, -1)), state)
+                  outputs.append(output)
+                  # states.append(state)
+                final_state = state
+                # concatenate in 0 direction: axis 0: [batch_at_time1, batch_at_time2, batch_at_time3, ...], axis 1: outputs
+                outputs = tf.reshape(tf.concat(outputs, axis=0),(-1, FLAGS.lstm_hiddensize))
+                aux_depths = tf.reshape(tf.concat(aux_depths,axis=0),(-1,55,74))
+                weights = tf.get_variable("weights",[FLAGS.lstm_hiddensize, self.output_size])        
+                biases = tf.get_variable('biases', [self.output_size])
+                # [?, ouput_size]=[?, hidden_size]*[hidden_size, output_size]
+                # with ? = num_steps * batch_size (b0t0, b0t1, ..., b1t0, b1t1, ...)
+                outputs = tf.matmul(outputs, weights) + biases
+                return cell, outputs, final_state, initial_state, aux_depths
+                # return cell, outputs, final_state, initial_state, aux_depths
+            self.inputs = tf.placeholder(tf.float32, shape = (FLAGS.batch_size,FLAGS.num_steps,self.input_size[1],self.input_size[2],self.input_size[3]))
+            self.lstm, self.outputs, _, self.initial_state, self.aux_depth = define_lstm(True, self.inputs)
+            
+            self.inputs_eva = tf.placeholder(tf.float32, shape=(1,1,self.input_size[1],self.input_size[2],self.input_size[3]))
+            self.lstm_eva, self.controls, self.state, self.initial_state_eva, self.pred_depth = define_lstm(False, self.inputs_eva)
+            # self.lstm_eva, self.controls, self.state, self.initial_state_eva, self.pred_depth = define_lstm(False, self.inputs_eva)
+            # import pdb; pdb.set_trace()
           else:
             if FLAGS.auxiliary_odom : raise IOError('Odometry cant be predicted when there is no n_fc')  
             #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
@@ -267,6 +308,14 @@ class Model(object):
       if(self.bound!=1 or self.bound!=0):
         # self.outputs = tf.mul(self.outputs, self.bound) # Scale output to -bound to bound
         self.outputs = tf.multiply(self.outputs, self.bound) # Scale output to -bound to bound
+
+  # def get_init_state(self, eva=True):
+  #   # if eva: return tf.zeros([1, FLAGS.lstm_hiddensize]).eval(session=self.sess)
+  #   # if eva: return self.lstm_eva.zero_state(1, tf.float32)
+  #   if eva: return self.lstm_eva.zero_state(1, tf.float32).eval(session=self.sess)
+  #   # else: return tf.zeros([FLAGS.batch_size, FLAGS.lstm_hiddensize]).eval(session=self.sess)
+  #   # else: return self.lstm.zero_state(FLAGS.batch_size, tf.float32)
+  #   else: return self.lstm.zero_state(FLAGS.batch_size, tf.float32).eval(session=self.sess)
 
   def define_loss(self):
     '''tensor for calculating the loss
@@ -322,47 +371,62 @@ class Model(object):
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
       # self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers, global_step=self.global_step)
         
-  def forward(self, inputs, auxdepth=False, auxodom=False, prev_action=[], targets=[], target_depth=[], target_odom=[]):
+  def forward(self, inputs, states=[], auxdepth=False, auxodom=False, prev_action=[], targets=[], target_depth=[], target_odom=[]):
     '''run forward pass and return action prediction
     '''
     tensors = [self.controls]
-    feed_dict={self.inputs: inputs}
+    if FLAGS.lstm:
+      # if len(states)==0 : feed_dict={self.inputs_eva: inputs}
+      if len(states)==0 : states = self.sess.run(self.initial_state_eva)
+      # else: feed_dict={self.inputs_eva: inputs, self.initial_state_eva: states}
+      feed_dict={self.inputs_eva: inputs, self.initial_state_eva: states}
+      tensors.append(self.state)
+    else:
+      feed_dict={self.inputs: inputs}
     if auxdepth: tensors.append(self.pred_depth)
     if auxodom:
       if len(prev_action)==0: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.pred_odom)
       feed_dict[self.prev_action] = prev_action
-    
-    if len(targets) != 0: 
+    if len(targets) != 0 and not FLAGS.lstm: 
       tensors.extend([self.total_loss, self.loss])
       feed_dict[self.targets] = targets
-    if len(target_depth) != 0: 
+    if len(target_depth) != 0 and not FLAGS.lstm: 
       tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = target_depth
-    if len(target_odom) != 0: 
+    if len(target_odom) != 0 and not FLAGS.lstm: 
+      if len(prev_action)==0: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = target_odom
+      feed_dict[self.prev_action] = prev_action
     
     results = self.sess.run(tensors, feed_dict=feed_dict)
     losses = {}
     aux_results = []
+    state = []
     control = results.pop(0)
+    if FLAGS.lstm: 
+      state = results.pop(0)
     if auxdepth: aux_results.append(results.pop(0))
     if auxodom: aux_results.append(results.pop(0))
-    if len(targets)!=0:
+    if len(targets)!=0 and not FLAGS.lstm:
       losses['t']=results.pop(0) # total loss
       losses['c']=results.pop(0) # control loss
-    if len(target_depth) != 0:
+    if len(target_depth) != 0 and not FLAGS.lstm:
       losses['d']=results.pop(0) # depth loss
-    if len(target_odom) != 0:
+    if len(target_odom) != 0 and not FLAGS.lstm:
       losses['o']=results.pop(0) # odometry loss
-    return control, losses, aux_results
+    return control, state, losses, aux_results
 
-  def backward(self, inputs, targets, depth_targets=[], odom_targets=[], prev_action=[]):
+  def backward(self, inputs, initial_state=[], targets=[], depth_targets=[], odom_targets=[], prev_action=[]):
     '''run forward pass and return action prediction
     '''
     tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
     feed_dict = {self.inputs: inputs, self.targets: targets}
+    if FLAGS.lstm:
+      assert len(initial_state)!=0
+      # print 'initial_state: ',initial_state.shape
+      feed_dict[self.initial_state]=initial_state
     if FLAGS.auxiliary_depth and len(depth_targets)!=0:
       tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = depth_targets
@@ -370,21 +434,15 @@ class Model(object):
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = odom_targets 
       feed_dict[self.prev_action] = prev_action 
+    
     results = self.sess.run(tensors, feed_dict=feed_dict)
+    
     control = results.pop(0) # control always first
     _ = results.pop(0) # and train_op second
     losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
     if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0: losses['o']=results.pop(0)
     
-    
-    # import pdb; pdb.set_trace()
-    # plt.subplot(1,2, 1)
-    # plt.imshow(depth_targets[0])
-    # plt.subplot(1,2, 2)
-    # plt.imshow(weights[0])
-    # plt.show()
-    # import pdb; pdb.set_trace()
     return control, losses
   
   def get_endpoint_activations(self, inputs):

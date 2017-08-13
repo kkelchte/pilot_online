@@ -304,7 +304,8 @@ def mobilenet_v1(inputs,
       net = slim.avg_pool2d(net, kernel_size, padding='VALID',
                             scope='AvgPool_1a')
       end_points['AvgPool_1a'] = net
-      net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
+      if is_training:
+        net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
       # print( str(net))
       with tf.variable_scope('aux_depth'):
         end_point = 'aux_fully_connected'
@@ -326,6 +327,8 @@ def mobilenet_v1(inputs,
         if spatial_squeeze:
           logits = tf.squeeze(logits, [1, 2], name='SpatialSqueeze')
         end_points['Logits'] = logits
+      
+
       # if prediction_fn:
       #   end_points['Predictions'] = prediction_fn(logits, scope='Predictions')
   return logits, end_points

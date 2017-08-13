@@ -50,7 +50,6 @@ tf.app.flags.DEFINE_integer("num_flights", 1000, "the maximum number of tries.")
 tf.app.flags.DEFINE_boolean("render", False, "Render the game while it is being learned.")
 tf.app.flags.DEFINE_boolean("experience_replay", True, "Accumulate a buffer of experience to learn from.")
 tf.app.flags.DEFINE_integer("buffer_size", 2000, "Define the number of experiences saved in the buffer.")
-tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_float("mean", 0., "Define the mean of the input data for centering around zero.(sandbox:0.5173,esat:0.2623)")
 tf.app.flags.DEFINE_float("std", 1., "Define the standard deviation of the data for normalization.(sandbox:0.3335,esat:0.1565)")
 #tf.app.flags.DEFINE_float("gradient_threshold", 0.0001, "The minimum amount of difference between target and estimated control before applying gradients.")
@@ -112,6 +111,7 @@ class PilotNode(object):
     self.nfc_positions =[] #used by n_fc networks for calculating odometry
     rospy.init_node('pilot', anonymous=True)
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
+    self.state = []
 
     # self.delay_evaluation = 5 #can't be set by ros because node is started before ros is started...
     if FLAGS.show_depth:
@@ -169,8 +169,9 @@ class PilotNode(object):
       self.exploration_noise.reset()
       if rospy.has_param('evaluate') :
         FLAGS.evaluate = rospy.get_param('evaluate')
-
-    
+      # if FLAGS.lstm:
+      #   self.state=self.model.get_init_state(True)
+      #   print 'set state to: ', self.state  
       if rospy.has_param('world_name') :
         self.world_name = os.path.basename(rospy.get_param('world_name').split('.')[0])
         if 'sandbox' in self.world_name: self.world_name='sandbox'
@@ -306,26 +307,26 @@ class PilotNode(object):
       trgt_odom = []
       with_loss = False
       if len(self.target_control)!=0 and not FLAGS.auxiliary_depth and not FLAGS.auxiliary_odom: 
-        trgt_ctrl = [[self.target_control[5]]]
+        trgt = self.target_control[5]
         with_loss = True
       elif len(self.target_control)!=0 and FLAGS.auxiliary_depth and len(self.target_depth)!=0 and not FLAGS.auxiliary_odom: 
-        trgt_ctrl = [[self.target_control[5]]]
+        trgt = self.target_control[5]
         trgt_depth = [copy.deepcopy(self.target_depth)]
         with_loss = True
       elif len(self.target_control)!=0 and not FLAGS.auxiliary_depth and FLAGS.auxiliary_odom and len(self.target_odom)!=0: 
-        trgt_ctrl = [[self.target_control[5]]]
+        trgt = self.target_control[5]
         trgt_odom = [copy.deepcopy(self.target_odom)]
         with_loss = True
       elif len(self.target_control)!=0 and FLAGS.auxiliary_depth and len(self.target_depth)!=0 and FLAGS.auxiliary_odom and len(self.target_odom)!=0: 
-        trgt_ctrl = [[self.target_control[5]]]
+        trgt = self.target_control[5]
         trgt_odom = [copy.deepcopy(self.target_odom)]
         trgt_depth = [copy.deepcopy(self.target_depth)]
         with_loss = True
       if with_loss:
         prev_ctr = [[self.prev_control[0]]]
-        control, losses, aux_results = self.model.forward([im], 
-          auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr, targets=trgt_ctrl, 
-          target_depth=trgt_depth, target_odom=trgt_odom)
+        control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state, 
+          auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr, 
+          targets=[[trgt]], target_depth=trgt_depth, target_odom=trgt_odom)
         if len(self.accumlosses.keys())==0: 
           self.accumlosses = losses
         else: 
@@ -333,7 +334,8 @@ class PilotNode(object):
           for v in losses.keys(): self.accumlosses[v]=self.accumlosses[v]+losses[v]
       else:
         prev_ctr = [[self.prev_control[0]]]
-        control, losses, aux_results = self.model.forward([im], auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
+        control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state, auxdepth=FLAGS.show_depth, 
+          auxodom=FLAGS.show_odom, prev_action=prev_ctr)
       if FLAGS.show_depth and FLAGS.auxiliary_depth and len(aux_results)>0: self.aux_depth = aux_results.pop(0)
       if FLAGS.show_odom and FLAGS.auxiliary_odom and len(aux_results)>0: self.aux_odom = aux_results.pop(0)
     
@@ -373,12 +375,14 @@ class PilotNode(object):
       # wait for first target depth in case of auxiliary depth.
       # in case the network can predict the depth
       self.time_4 = time.time()
-      # control, self.aux_depth = self.model.forward([im], aux=FLAGS.show_depth)
-      control, losses, aux_results = self.model.forward([im], auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
+      prev_ctr = [[self.prev_control[0]]]
+
+      control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state , 
+        auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
       if FLAGS.show_depth: self.aux_depth = aux_results.pop(0)
       if FLAGS.show_odom: self.aux_odom = aux_results.pop(0)
       self.time_5 = time.time()
-    
+      # print 'state: ', self.state
     ### SEND CONTROL
     noise = self.exploration_noise.noise()
     # yaw = control[0,0]
@@ -417,8 +421,6 @@ class PilotNode(object):
       # cv2.imshow('Final', final_img)      
       # cv2.waitKey(100)
       # cv2.destroyAllWindows()        
-
-
       concat_odoms=np.concatenate((self.aux_odom.astype(np.float32).flatten(), np.array(trgt_odom).astype(np.float32).flatten()))
       # self.odom_pub.publish(self.aux_odom.flatten())
       # print concat_odoms[4:6],' and ',concat_odoms[0:2]
@@ -434,6 +436,14 @@ class PilotNode(object):
       if FLAGS.auxiliary_odom: 
         aux_info['target_odom']=trgt_odom
         aux_info['prev_action']=prev_ctr
+      if FLAGS.lstm:
+        # aux_info['state']=(np.zeros(()))
+        # state type:  <type 'tuple'>  len:  2  len sub:  2  len subsub:  1  len subsubsub:  100
+        aux_info['state']=self.state
+        # aux_info['state']=((np.zeros((1,100)),np.zeros((1,100))+10),(np.ones((1,100)),np.ones((1,100))+20))
+        # print aux_info['state']
+        # (state layer0,output layer0,state layer1,output layer1)
+        # print 'state type: ',type(aux_info['state']),' len: ', len(aux_info['state']),' len sub: ', len(aux_info['state'][0]),' len subsub: ', len(aux_info['state'][0][0]),' len subsubsub: ', len(self.state[0][0][0])
       self.replay_buffer.add(im,[trgt],aux_info=aux_info)
       
     self.time_7 = time.time()
@@ -483,26 +493,36 @@ class PilotNode(object):
       oloss = [] #odometry loss
       tlossm, clossm, dlossm, olossm, tlossm_eva, clossm_eva, dlossm_eva, olossm_eva = 0,0,0,0,0,0,0,0
       #tot_batch_loss = []
-      if FLAGS.experience_replay and self.replay_buffer.size()>FLAGS.batch_size and not FLAGS.evaluate:
+      if FLAGS.experience_replay and self.replay_buffer.size()>(FLAGS.batch_size if not FLAGS.lstm else FLAGS.batch_size*FLAGS.num_steps) and not FLAGS.evaluate:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
-          states, targets, aux_info = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          inputs, targets, aux_info = self.replay_buffer.sample_batch(FLAGS.batch_size)
+          # import pdb; pdb.set_trace()
           #print('time to smaple batch of images: ',time.time()-st)
           if b==0:
             if FLAGS.plot_activations:
-              activation_images= self.model.plot_activations(states, targets.reshape((-1,1)))
+              activation_images= self.model.plot_activations(inputs, targets.reshape((-1,1)))
             if FLAGS.plot_depth and FLAGS.auxiliary_depth:
-              depth_predictions = self.model.plot_depth(states, aux_info['target_depth'].reshape(-1,55,74))
+              depth_predictions = self.model.plot_depth(inputs, aux_info['target_depth'].reshape(-1,55,74))
             if FLAGS.plot_histograms:
-              endpoint_activations = self.model.get_endpoint_activations(states)
+              endpoint_activations = self.model.get_endpoint_activations(inputs)
+          init_state=[]
           depth_targets=[]
           odom_targets=[]
           prev_action=[]
-          if FLAGS.auxiliary_depth: depth_targets=aux_info['target_depth'].reshape(-1,55,74)  
+          if FLAGS.lstm:
+            init_state=(aux_info['state'][:,0,0,0,0,:],
+                        aux_info['state'][:,0,0,1,0,:],
+                        aux_info['state'][:,0,1,0,0,:],
+                        aux_info['state'][:,0,1,1,0,:])
+            # print 'init_state ',init_state
+          if FLAGS.auxiliary_depth: 
+            depth_targets=aux_info['target_depth'].reshape(-1,55,74)
+            # depth_targets=aux_info['target_depth'].reshape(-1,55,74) if not FLAGS.lstm else aux_info['target_depth'].reshape(-1,FLAGS.num_steps, 55,74)
           if FLAGS.auxiliary_odom: 
-            odom_targets=aux_info['target_odom'].reshape(-1,4)
-            prev_action=aux_info['prev_action'].reshape(-1,1)
-          
-          controls, losses = self.model.backward(states,targets[:].reshape(-1,1), depth_targets, odom_targets, prev_action)
+            odom_targets=aux_info['target_odom'].reshape(-1,4) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 4)
+            prev_action=aux_info['prev_action'].reshape(-1,1) #if not FLAGS.lstm else aux_info['prev_action'].reshape(-1,FLAGS.num_steps, 1)
+          # todo add initial state for each rollout in the batch
+          controls, losses = self.model.backward(inputs,init_state,targets[:].reshape(-1,1),depth_targets, odom_targets, prev_action)
           tloss = losses['t']
           closs = losses['c']
           if FLAGS.auxiliary_depth: dloss.append(losses['d'])
@@ -595,11 +615,12 @@ class PilotNode(object):
       self.nfc_images = []
       self.nfc_positions = []
       self.furthest_point = 0
+      if FLAGS.lstm and not FLAGS.evaluate: self.replay_buffer.new_run()
       self.world_name = ''
       if self.run%10==0 and not FLAGS.evaluate:
         # Save a checkpoint every 20 runs.
         self.model.save(self.logfolder)
-      
+      self.state=[]
       if not FLAGS.evaluate:
         self.run+=1  
       else :

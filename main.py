@@ -62,8 +62,12 @@ tf.app.flags.DEFINE_string("network", 'mobile', "Define the type of network: inc
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether a depth map is predicted.")
 tf.app.flags.DEFINE_boolean("auxiliary_odom", False, "Specify whether the odometry or change in x,y,z,Y is predicted.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
+tf.app.flags.DEFINE_boolean("lstm", False, "In case of True, cnn-features are fed into LSTM control layers.")
 tf.app.flags.DEFINE_boolean("n_fc", False, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
 tf.app.flags.DEFINE_integer("n_frames", 3, "Specify the amount of frames concatenated in case of n_fc.")
+tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
+tf.app.flags.DEFINE_integer("num_steps", 8, "Define the number of steps the LSTM layers are unrolled.")
+tf.app.flags.DEFINE_integer("lstm_hiddensize", 100, "Define the number of hidden units in the LSTM control layer.")
 
 # ===========================
 #   Save settings
