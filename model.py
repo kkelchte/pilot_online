@@ -326,10 +326,11 @@ class Model(object):
     with tf.device(self.device):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       # self.loss = losses.mean_squared_error(tf.clip_by_value(self.outputs,1e-10,1.0), self.targets)
+      # if not FLAGS.rl:
       self.loss = tf.losses.mean_squared_error(self.outputs, self.targets)
-      if FLAGS.auxiliary_depth:
-        # self.depth_targets = tf.placeholder(tf.float32, [None,1,1,64])
+      if FLAGS.auxiliary_depth or FLAGS.rl:
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
+      if FLAGS.auxiliary_depth:
         weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32) # put loss weight on zero where depth is negative.        
         self.depth_loss = tf.losses.mean_squared_error(self.aux_depth,self.depth_targets,weights=weights)
         # self.depth_loss = losses.mean_squared_error(self.aux_depth, self.depth_targets, weights=0.0001)
@@ -360,19 +361,32 @@ class Model(object):
         self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, clip_gradient_norm=FLAGS.clip_grad)
         # self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
       else:
-        grads_and_vars = self.optimizer.compute_gradients(self.outputs, tf.trainable_variables())
-        # print grads_and_vars
+        grads_and_vars_output = self.optimizer.compute_gradients(self.outputs, tf.trainable_variables())
         # for each sample in batch get costs spread over actionspace (-1:1)~74width pixels
         costs = 1/(tf.reduce_mean(self.depth_targets, axis=1)+0.01)-1/5
         # importance_weights with mu=self.outputs and sigma=1
         sigma=1
         # costs [batch_size, 74] * normal_weights [74, 1]
-        depth_horizontal_size = tf.shape(self.depth_targets)[2].eval()
-        print depth_horizontal_size
-        action_range = reversed([2*x/depth_horizontal_size-1 for x in range(0,depth_horizontal_size)])
-        weighted_costs = np.array([costs[b]*np.array([1/(sigma*np.sqrt(2*np.pi))*np.exp(-.5((x-self.outputs[b,0])/sigma)**2) for x in action_range]).reshape(depth_horizontal_size,1)])
+        depth_horizontal_size = 74
+        # depth_horizontal_size = tf.shape(self.depth_targets)[2].eval(session=self.sess)
+        action_range = list(reversed([2*x/depth_horizontal_size-1 for x in range(0,depth_horizontal_size)]))
+        summed_cost = 0
+        actions=self.outputs
+        # actions=tf.unpack(tf.placeholder(tf.float32,[FLAGS.batch_size,1]))
+        # actions=tf.stack(self.outputs)
+        for b in range(FLAGS.batch_size):
+          # weight gaussian over importance of that possible action
+          normal_weights = [1/(sigma*tf.sqrt(2*np.pi))*tf.exp(-.5*((x-actions[b])/sigma)**2) for x in action_range]
+          # Average over batch
+          summed_cost=summed_cost+tf.matmul([costs[b]],normal_weights)[0]/FLAGS.batch_size
+          # weighted_costs.append(tf.matmul(costs[b],normal_weights))
         # grads_and_vars = [(weighted_costs[i]*gvt[0],gvt[1]) for i,gvt in enumerate(grads_and_vars)]
-        grads_and_vars = [(gvt[0],gvt[1]) for gvt in enumerate(grads_and_vars)]
+        grads_and_vars_output = [(summed_cost*gvt[0] if gvt[0]!=None else None,gvt[1]) for gvt in grads_and_vars_output ]
+        # grads_and_vars_loss = self.optimizer.compute_gradients(self.total_loss, tf.trainable_variables())
+        # TODO: assert that the tensors for which gradients are defined are the same !
+        # grads_and_vars = [(grads_and_vars_output[i][0]+grads_and_vars_loss[i][0] if grads_and_vars_output[i][0] != None and grads_and_vars_loss[i][0]!=None else None,
+        #   grads_and_vars_output[i][1]) for i in range(len(grads_and_vars_loss))]
+        grads_and_vars = grads_and_vars_output       
         self.train_op = self.optimizer.apply_gradients(grads_and_vars)
       
 
@@ -444,15 +458,20 @@ class Model(object):
   def backward(self, inputs, initial_state=[], targets=[], depth_targets=[], odom_targets=[], prev_action=[]):
     '''run forward pass and return action prediction
     '''
+    # if not FLAGS.rl:
     tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
     feed_dict = {self.inputs: inputs, self.targets: targets}
+    # else:
+    #   tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
+    #   feed_dict = {self.inputs: inputs}
     if FLAGS.lstm:
       assert len(initial_state)!=0
       # print 'initial_state: ',initial_state.shape
       feed_dict[self.initial_state]=initial_state
     if (FLAGS.auxiliary_depth or FLAGS.rl) and len(depth_targets)!=0:
-      tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = depth_targets
+      if FLAGS.auxiliary_depth:
+        tensors.append(self.depth_loss)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0:
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = odom_targets 
@@ -463,7 +482,7 @@ class Model(object):
     control = results.pop(0) # control always first
     _ = results.pop(0) # and train_op second
     losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
-    if (FLAGS.auxiliary_depth or FLAGS.rl) and len(depth_targets)!=0: losses['d']=results.pop(0)
+    if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0: losses['o']=results.pop(0)
     
     return control, losses

@@ -83,7 +83,7 @@ class PilotNode(object):
 
     np.random.seed(FLAGS.random_seed)
     tf.set_random_seed(FLAGS.random_seed)
-  
+    
     # Initialize replay memory
     self.logfolder = logfolder
     self.world_name = ''
@@ -91,6 +91,7 @@ class PilotNode(object):
     self.run=0
     self.run_eva=0
     self.maxy=-10
+    self.speed=FLAGS.speed
     self.accumlosses = {}
     self.current_distance=0
     self.furthest_point=0
@@ -165,6 +166,7 @@ class PilotNode(object):
       self.start_time = rospy.get_time()
       self.finished = False
       self.exploration_noise.reset()
+      self.speed=FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       if rospy.has_param('evaluate') :
         FLAGS.evaluate = rospy.get_param('evaluate')
       # if FLAGS.lstm:
@@ -224,7 +226,7 @@ class PilotNode(object):
       # print 'min: ',np.amin(im),' and max: ',np.amax(im)
       # im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
       # Resize image
-      if FLAGS.auxiliary_depth:
+      if FLAGS.auxiliary_depth or FLAGS.rl:
         size = self.model.depth_input_size #(55,74)
         im=sm.imresize(im,size,'nearest') # dur: 0.002
         # cv2.imshow('depth', im) # dur: 0.002
@@ -294,7 +296,7 @@ class PilotNode(object):
             # print im.shape
             self.nfc_images.pop(0)
         self.process_input(im)
-      if FLAGS.auxiliary_depth:
+      if FLAGS.auxiliary_depth or FLAGS.rl:
         self.target_depth = im #(64,)
         
   def depth_callback_recovery(self, msg, args):
@@ -350,7 +352,7 @@ class PilotNode(object):
       else:
         trgt = self.target_control[5]
         # print(trgt)
-      if FLAGS.auxiliary_depth and len(self.target_depth) == 0:
+      if (FLAGS.auxiliary_depth or FLAGS.rl) and len(self.target_depth) == 0:
         print('No target depth')
         return
       else:
@@ -391,18 +393,20 @@ class PilotNode(object):
     # yaw = control[0,0]
     # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
     # yaw = max(-1,min(1,np.random.normal()))
-    if trgt != 100:
+    if trgt != 100 and not FLAGS.evaluate:
       action = trgt if np.random.binomial(1,FLAGS.alpha) else control[0,0]
     else:
       action = control[0,0]
     msg = Twist()
     if FLAGS.type_of_noise == 'ou':
-      msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
+      msg.linear.x = self.speed #0.8 # 1.8 #
+      # msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
       msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
       msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
       msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
     elif FLAGS.type_of_noise == 'uni':
-      msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
+      msg.linear.x = self.speed
+      # msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)
       msg.linear.z = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_z, FLAGS.sigma_z)
       msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_yaw, FLAGS.sigma_yaw)))
