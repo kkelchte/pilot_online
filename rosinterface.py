@@ -394,7 +394,7 @@ class PilotNode(object):
     # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
     # yaw = max(-1,min(1,np.random.normal()))
     if trgt != 100 and not FLAGS.evaluate:
-      action = trgt if np.random.binomial(1,FLAGS.alpha) else control[0,0]
+      action = trgt if np.random.binomial(1,FLAGS.alpha**self.run) else control[0,0]
     else:
       action = control[0,0]
     msg = Twist()
