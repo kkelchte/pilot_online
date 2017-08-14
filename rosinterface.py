@@ -391,7 +391,6 @@ class PilotNode(object):
     # yaw = control[0,0]
     # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
     # yaw = max(-1,min(1,np.random.normal()))
-    print 'control: ',control,' shape: ',control.shape
     if trgt != 100:
       action = trgt if np.random.binomial(1,FLAGS.alpha) else control[0,0]
     else:
@@ -401,8 +400,7 @@ class PilotNode(object):
       msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
       msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
       msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
-      # msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
-      msg.angular.z = -1
+      msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
     elif FLAGS.type_of_noise == 'uni':
       msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)

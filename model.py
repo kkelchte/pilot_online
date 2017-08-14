@@ -357,7 +357,8 @@ class Model(object):
       else:
         raise IOError('Model: Unknown optimizer.')
       if not FLAGS.rl:
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, clip_gradient_norm=FLAGS.clip_grad)
+        # self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
       else:
         grads_and_vars = self.optimizer.compute_gradients(self.outputs, tf.trainable_variables())
         # print grads_and_vars
