@@ -137,9 +137,7 @@ class PilotNode(object):
     if rospy.has_param('rgb_image') and not FLAGS.depth_input:
       rospy.Subscriber(rospy.get_param('rgb_image'), Image, self.image_callback)
     if rospy.has_param('depth_image'):
-      if FLAGS.depth_input:        
-        rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
-      if FLAGS.auxiliary_depth:
+      if FLAGS.depth_input or FLAGS.auxiliary_depth or FLAGS.rl:        
         rospy.Subscriber(rospy.get_param('depth_image'), Image, self.depth_callback)
     if FLAGS.recovery_cameras:
       # callbacks={'left':{'30':image_callback_left_30,'60':image_callback_left_60},'right':{'30':image_callback_right_30,'60':image_callback_right_60}}
@@ -219,7 +217,12 @@ class PilotNode(object):
     else:
       im = im[::8,::8]
       shp=im.shape
-      im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
+      # assume that when value is not a number it is due to a too large distance
+      # values can be nan for when they are closer than 0.5m but than the evaluate node should
+      # kill the run anyway.
+      im=np.asarray([ e*1.0 if not np.isnan(e) else 5 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
+      # print 'min: ',np.amin(im),' and max: ',np.amax(im)
+      # im=np.asarray([ e*1.0 if not np.isnan(e) else 0 for e in im.flatten()]).reshape(shp) # clipping nans: dur: 0.010
       # Resize image
       if FLAGS.auxiliary_depth:
         size = self.model.depth_input_size #(55,74)
@@ -388,6 +391,7 @@ class PilotNode(object):
     # yaw = control[0,0]
     # if np.random.binomial(1,FLAGS.epsilon) and not FLAGS.evaluate:
     # yaw = max(-1,min(1,np.random.normal()))
+    print 'control: ',control,' shape: ',control.shape
     if trgt != 100:
       action = trgt if np.random.binomial(1,FLAGS.alpha) else control[0,0]
     else:
@@ -397,7 +401,8 @@ class PilotNode(object):
       msg.linear.x = FLAGS.speed+(not FLAGS.evaluate)*FLAGS.sigma_x*noise[0] #0.8 # 1.8 #
       msg.linear.y = (not FLAGS.evaluate)*noise[1]*FLAGS.sigma_y
       msg.linear.z = (not FLAGS.evaluate)*noise[2]*FLAGS.sigma_z
-      msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
+      # msg.angular.z = max(-1,min(1,action+(not FLAGS.evaluate)*FLAGS.sigma_yaw*noise[3]))
+      msg.angular.z = -1
     elif FLAGS.type_of_noise == 'uni':
       msg.linear.x = FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       msg.linear.y = (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_y, FLAGS.sigma_y)
@@ -431,7 +436,7 @@ class PilotNode(object):
     # ADD EXPERIENCE REPLAY
     if FLAGS.experience_replay and not FLAGS.evaluate and trgt != -100:
       aux_info = {}
-      if FLAGS.auxiliary_depth: 
+      if FLAGS.auxiliary_depth or FLAGS.rl: 
         aux_info['target_depth']=trgt_depth
       if FLAGS.auxiliary_odom: 
         aux_info['target_odom']=trgt_odom
@@ -515,7 +520,7 @@ class PilotNode(object):
                         aux_info['state'][:,0,1,0,0,:],
                         aux_info['state'][:,0,1,1,0,:])
             # print 'init_state ',init_state
-          if FLAGS.auxiliary_depth: 
+          if FLAGS.auxiliary_depth or FLAGS.rl: 
             depth_targets=aux_info['target_depth'].reshape(-1,55,74)
             # depth_targets=aux_info['target_depth'].reshape(-1,55,74) if not FLAGS.lstm else aux_info['target_depth'].reshape(-1,FLAGS.num_steps, 55,74)
           if FLAGS.auxiliary_odom: 

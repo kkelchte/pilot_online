@@ -69,6 +69,8 @@ tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_integer("num_steps", 8, "Define the number of steps the LSTM layers are unrolled.")
 tf.app.flags.DEFINE_integer("lstm_hiddensize", 100, "Define the number of hidden units in the LSTM control layer.")
 
+tf.app.flags.DEFINE_boolean("rl", False, "In case of rl, use reinforcement learning to weight the gradients with a cost-to-go estimated from current depth.")
+
 # ===========================
 #   Save settings
 # ===========================

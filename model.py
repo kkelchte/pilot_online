@@ -233,13 +233,13 @@ class Model(object):
               # self.inputs = tf.placeholder(tf.float32, shape = (self.input_size[0],None,self.input_size[1],self.input_size[2],self.input_size[3]))
               with tf.variable_scope("lstm_control", reuse=not is_training):
                 def lstm():
-                  lstm_cell = tf.contrib.rnn.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
-                  # lstm_cell = tf.nn.rnn_cell.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
-                  lstm_cell = tf.contrib.rnn.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
-                  # lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
+                  # lstm_cell = tf.contrib.rnn.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
+                  lstm_cell = tf.nn.rnn_cell.LSTMCell(FLAGS.lstm_hiddensize, forget_bias=0)
+                  # lstm_cell = tf.contrib.rnn.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
+                  lstm_cell = tf.nn.rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=FLAGS.dropout_keep_prob if is_training else 1)
                   return lstm_cell
-                cell = tf.contrib.rnn.MultiRNNCell([lstm(), lstm()])
-                # cell = tf.nn.rnn_cell.MultiRNNCell([lstm(), lstm()])
+                # cell = tf.contrib.rnn.MultiRNNCell([lstm(), lstm()])
+                cell = tf.nn.rnn_cell.MultiRNNCell([lstm(), lstm()])
                 initial_state = cell.zero_state(FLAGS.batch_size if is_training else 1, tf.float32)
                 # state = self.init_state = tf.placeholder(tf.float32, shape = (FLAGS.batch_size if is_training else 1, 2*2*FLAGS.lstm_hiddensize))
                 state = initial_state
@@ -356,23 +356,42 @@ class Model(object):
         self.optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.lr) 
       else:
         raise IOError('Model: Unknown optimizer.')
+      if not FLAGS.rl:
+        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
+      else:
+        grads_and_vars = self.optimizer.compute_gradients(self.outputs, tf.trainable_variables())
+        # print grads_and_vars
+        # for each sample in batch get costs spread over actionspace (-1:1)~74width pixels
+        costs = 1/(tf.reduce_mean(self.depth_targets, axis=1)+0.01)-1/5
+        # importance_weights with mu=self.outputs and sigma=1
+        sigma=1
+        # costs [batch_size, 74] * normal_weights [74, 1]
+        depth_horizontal_size = tf.shape(self.depth_targets)[2].eval()
+        print depth_horizontal_size
+        action_range = reversed([2*x/depth_horizontal_size-1 for x in range(0,depth_horizontal_size)])
+        weighted_costs = np.array([costs[b]*np.array([1/(sigma*np.sqrt(2*np.pi))*np.exp(-.5((x-self.outputs[b,0])/sigma)**2) for x in action_range]).reshape(depth_horizontal_size,1)])
+        # grads_and_vars = [(weighted_costs[i]*gvt[0],gvt[1]) for i,gvt in enumerate(grads_and_vars)]
+        grads_and_vars = [(gvt[0],gvt[1]) for gvt in enumerate(grads_and_vars)]
+        self.train_op = self.optimizer.apply_gradients(grads_and_vars)
+      
+
+
+
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
-      if FLAGS.grad_mul:
-        gradient_multipliers = {
-          'InceptionV3/Logits/final_tanh/weights/read:0': 10,
-          'InceptionV3/Logits/final_tanh/biases/read:0': 10,
-        }
-      else:
-        gradient_multipliers = {}
-      if FLAGS.freeze:
-        global_variables = [v for v in tf.global_variables() if (v.name.find('Adadelta')==-1 and v.name.find('BatchNorm')==-1)]
-        control_variables = [v for v in global_variables if v.name.find('control')!=-1]   # changed logits to control
-        print('Only training control variables: ',[v.name for v in control_variables])      
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables, clip_gradient_norm=FLAGS.clip_grad)
-      else:
-        self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, gradient_multipliers=gradient_multipliers, clip_gradient_norm=FLAGS.clip_grad)
-      # self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, gradient_multipliers=gradient_multipliers, global_step=self.global_step)
+      # if FLAGS.grad_mul:
+      #   gradient_multipliers = {
+      #     'InceptionV3/Logits/final_tanh/weights/read:0': 10,
+      #     'InceptionV3/Logits/final_tanh/biases/read:0': 10,
+      #   }      
+      # else:
+      #   gradient_multipliers = {}
+      # if FLAGS.freeze:
+      #   global_variables = [v for v in tf.global_variables() if (v.name.find('Adadelta')==-1 and v.name.find('BatchNorm')==-1)]
+      #   control_variables = [v for v in global_variables if v.name.find('control')!=-1]   # changed logits to control
+      #   print('Only training control variables: ',[v.name for v in control_variables])      
+      #   self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables, clip_gradient_norm=FLAGS.clip_grad)
+      # else:
         
   def forward(self, inputs, states=[], auxdepth=False, auxodom=False, prev_action=[], targets=[], target_depth=[], target_odom=[]):
     '''run forward pass and return action prediction
@@ -430,7 +449,7 @@ class Model(object):
       assert len(initial_state)!=0
       # print 'initial_state: ',initial_state.shape
       feed_dict[self.initial_state]=initial_state
-    if FLAGS.auxiliary_depth and len(depth_targets)!=0:
+    if (FLAGS.auxiliary_depth or FLAGS.rl) and len(depth_targets)!=0:
       tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = depth_targets
     if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0:
@@ -443,7 +462,7 @@ class Model(object):
     control = results.pop(0) # control always first
     _ = results.pop(0) # and train_op second
     losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
-    if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
+    if (FLAGS.auxiliary_depth or FLAGS.rl) and len(depth_targets)!=0: losses['d']=results.pop(0)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0: losses['o']=results.pop(0)
     
     return control, losses
