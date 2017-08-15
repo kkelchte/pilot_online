@@ -308,14 +308,17 @@ def mobilenet_v1(inputs,
         net = slim.dropout(net, keep_prob=dropout_keep_prob, scope='Dropout_1b')
       # print( str(net))
       with tf.variable_scope('aux_depth'):
-        end_point = 'aux_fully_connected'
+        end_point = 'aux_depth_fc'
         depth_aux_feat = tf.reshape(net,[-1,256]) if depth_multiplier==0.25 else tf.reshape(net,[-1,1024])
         aux_logits=slim.fully_connected(depth_aux_feat, 4096, tf.nn.relu)
         end_points[end_point] = aux_logits
         
-        end_point = 'aux_fully_connected_1'
+        end_point = 'aux_depth_fc_1'
         aux_logits=slim.fully_connected(aux_logits, 55*74, tf.nn.relu)
+        end_points[end_point] = aux_logits
+
         # output height 55 width 74
+        end_point = 'aux_depth_reshaped'
         aux_logits=tf.reshape(aux_logits, [-1, 55, 74])
         end_points[end_point] = aux_logits
 

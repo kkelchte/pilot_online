@@ -521,7 +521,10 @@ class PilotNode(object):
                         aux_info['state'][:,0,0,1,0,:],
                         aux_info['state'][:,0,1,0,0,:],
                         aux_info['state'][:,0,1,1,0,:])
-            # print 'init_state ',init_state
+            # if FLAGS.use_init_state:
+            #   init_state=
+            assert init_state[0].shape[0]==FLAGS.batch_size
+            # print 'init_state sizes ',init_state[0].shape
           if FLAGS.auxiliary_depth or FLAGS.rl: 
             depth_targets=aux_info['target_depth'].reshape(-1,55,74)
             # depth_targets=aux_info['target_depth'].reshape(-1,55,74) if not FLAGS.lstm else aux_info['target_depth'].reshape(-1,FLAGS.num_steps, 55,74)

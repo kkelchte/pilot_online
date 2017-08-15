@@ -58,7 +58,7 @@ tf.app.flags.DEFINE_float("action_bound", 1.0, "Define between what bounds the a
 tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacting with the real (bebop) drone.")
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
-tf.app.flags.DEFINE_string("network", 'mobile', "Define the type of network: inception / fc_control / depth / mobile / mobile_small.")
+tf.app.flags.DEFINE_string("network", 'mobile_small', "Define the type of network: inception / fc_control / depth / mobile / mobile_small.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether a depth map is predicted.")
 tf.app.flags.DEFINE_boolean("auxiliary_odom", False, "Specify whether the odometry or change in x,y,z,Y is predicted.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")

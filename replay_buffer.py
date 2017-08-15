@@ -60,6 +60,11 @@ class ReplayBuffer(object):
       # else:
       #   inds = np.random.choice(range(batch_size), batch_size)
       if FLAGS.lstm:
+        # 0. Clean up buffer list to assure that buffer is never shorter than num_steps
+        self.buffer_list=[buff for buff in self.buffer_list if len(buff)>=self.num_steps]
+        self.count=sum([len(buff) for buff in self.buffer_list])
+        # print 'buffer size: ',self.count
+        # for i,b in enumerate(self.buffer_list): print ' buff: ',i,' len ',len(b)
         # 1. select rollouts / buffers in bufferlist to sample from
         if len(self.buffer_list)>batch_size:
           # caution this could demand big amount of RAM if replay buffer gets big
@@ -70,7 +75,6 @@ class ReplayBuffer(object):
         # 2. Choose a startindex that allows num_steps concatenated frames and put them in a batch
         batch=[]
         for buff in selected_buffers:
-          if len(buff) < self.num_steps: continue
           start_i = random.choice(range(len(buff)-self.num_steps+1))
           batch.append([buff[start_i+i] for i in range(self.num_steps)])
         assert len(batch) != 0, IOError('No buffer in bufferlist(',str(self.buffer_list),') found that is longer than num_steps(',self.num_steps,')')
@@ -87,7 +91,7 @@ class ReplayBuffer(object):
           for k in rollout[0][2].keys():
             aux_batch[k].append(np.array([_[2][k] for _ in rollout]))
         # 4. Put the list together in an array
-        input_batch = np.asarray(input_batch)
+        input_batch = np.asarray(input_batch) #use asarray to avoid copying the data
         target_batch = np.asarray(target_batch)
         for k in aux_batch.keys(): aux_batch[k]=np.array(aux_batch[k])
       else:
