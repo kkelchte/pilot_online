@@ -421,7 +421,7 @@ class Model(object):
       feed_dict={self.inputs: inputs}
     if auxdepth: tensors.append(self.pred_depth)
     if auxodom:
-      if len(prev_action)==0: raise IOError('previous action was not provided to model.forward.') 
+      if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.pred_odom)
       feed_dict[self.prev_action] = prev_action
     if len(targets) != 0 and not FLAGS.lstm: 
