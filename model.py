@@ -29,8 +29,8 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception ne
 # Std of uniform initialization
 tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
-tf.app.flags.DEFINE_float("learning_rate", 0.01, "Start learning rate.")
 tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
+tf.app.flags.DEFINE_float("learning_rate", 0.1, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 0.01, "Define the weight applied to the depth values in the loss relative to the control loss.")
 tf.app.flags.DEFINE_float("odom_weight", 0.01, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
@@ -52,7 +52,8 @@ tf.app.flags.DEFINE_boolean("feed_previous_action", True, "Feed previous action 
 tf.app.flags.DEFINE_boolean("concatenate_depth", False, "Add depth prediction of 2 last frames for odometry prediction.")
 tf.app.flags.DEFINE_boolean("concatenate_odom", False, "Add odom prediction of 2 last frames for control prediction.")
 tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidden units in the odometry decision layer.")
-tf.app.flags.DEFINE_string("odom_loss", 'absolute_difference', "absolute_difference or mean_squared")
+tf.app.flags.DEFINE_string("odom_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
+tf.app.flags.DEFINE_string("depth_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
 
 """
 Build basic NN model
@@ -81,7 +82,6 @@ class Model(object):
     print 'learning rate: ', self.lr    
     self.global_step = tf.Variable(0, name='global_step', trainable=False)
     self.define_network()
-    
     
     if not FLAGS.continue_training and not FLAGS.evaluate:
       if FLAGS.model_path[0]!='/':
@@ -208,7 +208,8 @@ class Model(object):
                   is_training=is_training, reuse= (i!=0 and is_training) or not is_training, depth_multiplier=depth_multiplier)
                 features.append(tf.squeeze(endpoints['AvgPool_1a'],[1,2]))
                 if FLAGS.concatenate_depth:
-                  features.append(endpoints['aux_depth_fc_1'])
+                  features.append(endpoints['aux_depth_enc'])
+                  # features.append(endpoints['aux_depth_fc_1'])
               with tf.variable_scope('concatenated_feature', reuse=not is_training): 
                 features=tf.concat(features, axis=1)
                 # features = tf.squeeze(features,[1,2])
@@ -217,10 +218,10 @@ class Model(object):
                   features = slim.dropout(features, keep_prob=FLAGS.dropout_keep_prob, scope='Dropout_1b')  
               with tf.variable_scope('aux_odom', reuse=not is_training):
                 aux_odom_input = tf.concat([features,self.prev_action], axis=1) if FLAGS.feed_previous_action else features
-                aux_odom = slim.fully_connected(aux_odom_input, FLAGS.odom_hidden_units, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
-                aux_odom = slim.fully_connected(aux_odom, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
+                aux_odom_logits = slim.fully_connected(aux_odom_input, FLAGS.odom_hidden_units, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
+                aux_odom = slim.fully_connected(aux_odom_logits, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
               with tf.variable_scope('control', reuse=not is_training):  
-                control_input = features if not FLAGS.concatenate_odom else tf.concat([features,aux_odom],axis=1)
+                control_input = features if not FLAGS.concatenate_odom else tf.concat([features,aux_odom_logits],axis=1)
                 outputs = slim.fully_connected(control_input, 1, None, normalizer_fn=None, scope='Fc_control')
               aux_depth = endpoints['aux_depth_reshaped']
               return outputs, aux_depth, aux_odom, endpoints
@@ -334,14 +335,22 @@ class Model(object):
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
       if FLAGS.auxiliary_depth:
         weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32) # put loss weight on zero where depth is negative.        
-        self.depth_loss = tf.losses.mean_squared_error(self.aux_depth,self.depth_targets,weights=weights)
-        # self.depth_loss = losses.mean_squared_error(self.aux_depth, self.depth_targets, weights=0.0001)
+	if FLAGS.depth_loss == 'mean_squared':
+          self.depth_loss = tf.losses.mean_squared_error(self.aux_depth,self.depth_targets,weights=weights)
+        elif FLAGS.depth_loss == 'absolute_difference':
+          self.depth_loss = tf.losses.absolute_difference(self.aux_depth,self.depth_targets,weights=weights)
+        elif FLAGS.depth_loss == 'huber':
+          self.depth_loss = tf.losses.huber_loss(self.aux_depth,self.depth_targets,weights=weights)
+        else :
+          raise 'Depth loss is unknown: {}'.format(FLAGS.depth_loss)
       if FLAGS.auxiliary_odom:
         self.odom_targets = tf.placeholder(tf.float32, [None,4])
         if FLAGS.odom_loss == 'absolute_difference':
           self.odom_loss = tf.losses.absolute_difference(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
         elif FLAGS.odom_loss == 'mean_squared':
           self.odom_loss = tf.losses.mean_squared_error(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
+        elif FLAGS.odom_loss == 'huber':
+          self.odom_loss = tf.losses.huber_loss(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)  
         else :
           raise 'Odom loss is unknown: {}'.format(FLAGS.odom_loss)
       self.total_loss = tf.losses.get_total_loss()
@@ -404,7 +413,7 @@ class Model(object):
       #   control_variables = [v for v in global_variables if v.name.find('control')!=-1]   # changed logits to control
       #   print('Only training control variables: ',[v.name for v in control_variables])      
       #   self.train_op = slim.learning.create_train_op(self.total_loss, self.optimizer, global_step=self.global_step, variables_to_train=control_variables, clip_gradient_norm=FLAGS.clip_grad)
-      # else:
+
         
   def forward(self, inputs, states=[], auxdepth=False, auxodom=False, prev_action=[], targets=[], target_depth=[], target_odom=[]):
     '''run forward pass and return action prediction
@@ -419,7 +428,8 @@ class Model(object):
       tensors.append(self.state)
     else:
       feed_dict={self.inputs: inputs}
-    if auxdepth: tensors.append(self.pred_depth)
+    if auxdepth: 
+      tensors.append(self.pred_depth)
     if auxodom:
       if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.pred_odom)
@@ -431,7 +441,7 @@ class Model(object):
       tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = target_depth
     if len(target_odom) != 0 and not FLAGS.lstm: 
-      if len(prev_action)==0: raise IOError('previous action was not provided to model.forward.') 
+      if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = target_odom
       feed_dict[self.prev_action] = prev_action
@@ -471,7 +481,9 @@ class Model(object):
       feed_dict[self.depth_targets] = depth_targets
       if FLAGS.auxiliary_depth:
         tensors.append(self.depth_loss)
-    if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0:
+    if FLAGS.auxiliary_odom and len(odom_targets)!=0:
+      if FLAGS.feed_previous_action and len(prev_action)==0: 
+        raise IOError('previous action was not provided to model.backward.') 
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = odom_targets 
       feed_dict[self.prev_action] = prev_action 
@@ -482,7 +494,7 @@ class Model(object):
     _ = results.pop(0) # and train_op second
     losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
     if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
-    if FLAGS.auxiliary_odom and len(odom_targets)!=0 and len(prev_action)!=0: losses['o']=results.pop(0)
+    if FLAGS.auxiliary_odom and len(odom_targets)!=0: losses['o']=results.pop(0)
     
     return control, losses
   
@@ -578,14 +590,15 @@ class Model(object):
   def plot_depth(self, inputs, depth_targets):
     '''plot depth predictions and return np array as floating image'''
     if not FLAGS.auxiliary_depth: raise IOError('can t plot depth predictions when auxiliary depth is False.')
-    control, depths = self.forward(inputs, aux=True)
+    depths = self.sess.run(self.pred_depth, feed_dict={self.inputs: inputs})
     n=3
     fig = plt.figure(1, figsize=(5,5))
     fig.suptitle('depth predictions', fontsize=20)
     for i in range(n):
       plt.axis('off') 
       plt.subplot(n, 3, 1+3*i)
-      plt.imshow(inputs[i]*1/255.)
+      if FLAGS.n_fc: plt.imshow(inputs[i][:,:,0+3*(FLAGS.n_frames-1):]*1/255.)
+      else : plt.imshow(inputs[i][:,:,0:3]*1/255.)
       plt.axis('off') 
       plt.subplot(n, 3, 2+3*i)
       plt.imshow(depths[i]*1/5.)

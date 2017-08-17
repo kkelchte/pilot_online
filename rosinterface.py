@@ -195,7 +195,11 @@ class PilotNode(object):
     if not self.ready or self.finished: return []
     try:
       # Convert your ROS Image message to OpenCV2
-      im = bridge.imgmsg_to_cv2(msg, 'bgr8') 
+      im = bridge.imgmsg_to_cv2(msg, 'rgb8') # changed to normal RGB order as i ll use matplotlib and PIL instead of opencv
+      # an idea could be to swap these channels during online training as this shouldnt matter though this could
+      # explain the performance drop coming from a pretrained network.
+      # This does mean that online trained nets might be worth nothing...
+      # im = bridge.imgmsg_to_cv2(msg, 'bgr8') 
     except CvBridgeError as e:
       print(e)
     else:

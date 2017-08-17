@@ -317,10 +317,17 @@ def mobilenet_v1(inputs,
         aux_logits=slim.fully_connected(aux_logits, 55*74, tf.nn.relu)
         end_points[end_point] = aux_logits
 
+        # encode 4070 feat back to 256 representation
+        end_point = 'aux_depth_enc'
+        aux_enc_logits = slim.fully_connected(aux_logits, 200, None)
+        end_points[end_point] = aux_enc_logits
+
         # output height 55 width 74
         end_point = 'aux_depth_reshaped'
         aux_logits=tf.reshape(aux_logits, [-1, 55, 74])
         end_points[end_point] = aux_logits
+
+
 
       with tf.variable_scope('control'): 
         # 1 x 1 x 1024
