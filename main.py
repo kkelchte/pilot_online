@@ -42,6 +42,7 @@ tf.app.flags.DEFINE_float("tau", 0.001, "Update target networks in a soft manner
 #   Utility Parameters
 # ===========================
 # Print output of ros verbose or not
+tf.app.flags.DEFINE_boolean("load_config", False, "Load flags from the configuration file found in the checkpoint path.")
 tf.app.flags.DEFINE_boolean("verbose", True, "Print output of ros verbose or not.")
 # Directory for storing tensorboard summary results
 tf.app.flags.DEFINE_string("summary_dir", 'tensorflow/log/', "Choose the directory to which tensorflow should save the summaries.")
@@ -59,11 +60,11 @@ tf.app.flags.DEFINE_boolean("real", False, "Define settings in case of interacti
 tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_supervised.launch.")
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
 tf.app.flags.DEFINE_string("network", 'mobile_small', "Define the type of network: inception / fc_control / depth / mobile / mobile_small.")
-tf.app.flags.DEFINE_boolean("auxiliary_depth", False, "Specify whether a depth map is predicted.")
-tf.app.flags.DEFINE_boolean("auxiliary_odom", False, "Specify whether the odometry or change in x,y,z,Y is predicted.")
+tf.app.flags.DEFINE_boolean("auxiliary_depth", True, "Specify whether a depth map is predicted.")
+tf.app.flags.DEFINE_boolean("auxiliary_odom", True, "Specify whether the odometry or change in x,y,z,Y is predicted.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 tf.app.flags.DEFINE_boolean("lstm", False, "In case of True, cnn-features are fed into LSTM control layers.")
-tf.app.flags.DEFINE_boolean("n_fc", False, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
+tf.app.flags.DEFINE_boolean("n_fc", True, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
 tf.app.flags.DEFINE_integer("n_frames", 3, "Specify the amount of frames concatenated in case of n_fc.")
 tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_integer("num_steps", 8, "Define the number of steps the LSTM layers are unrolled.")
@@ -88,10 +89,47 @@ def save_config(logfolder, file_name = "configuration"):
     ET.SubElement(flg, f, name=f).text = str(flags_dict[f])
   tree = ET.ElementTree(root)
   tree.write(os.path.join(logfolder,file_name+".xml"), encoding="us-ascii", xml_declaration=True, method="xml")
-
+# ===========================
+#   Load settings
+# ===========================
+def load_config(modelfolder, file_name = "configuration"):
+  """
+  save all the FLAG values in a config file / xml file
+  """
+  print("Load configuration from: ", modelfolder)
+  tree = ET.parse(os.path.join(modelfolder,file_name+".xml"))
+  boollist=['concatenate_depth','concatenate_odom','lstm','auxiliary_odom',
+  'n_fc','feed_previous_action','auxiliary_depth','depth_input']
+  intlist=['odom_hidden_units','n_frames','lstm_hiddensize']
+  floatlist=[]
+  stringlist=['network']
+  for child in tree.getroot().find('flags'):
+    try :
+      if child.attrib['name'] in boollist:
+        FLAGS.__setattr__(child.attrib['name'], child.text=='True')
+        # print 'set:', child.attrib['name'], child.text=='True'
+      elif child.attrib['name'] in intlist:
+        FLAGS.__setattr__(child.attrib['name'], int(child.text))
+        # print 'set:', child.attrib['name'], int(child.text)
+      elif child.attrib['name'] in floatlist:
+        FLAGS.__setattr__(child.attrib['name'], float(child.text))
+        # print 'set:', child.attrib['name'], float(child.text)
+      elif child.attrib['name'] in stringlist:
+        FLAGS.__setattr__(child.attrib['name'], str(child.text))
+        # print 'set:', child.attrib['name'], str(child.text)
+    except : 
+      print 'couldnt set:', child.attrib['name'], child.text
+      pass
 
 # Use the main method for starting the training procedure and closing it in the end.
 def main(_):
+  if FLAGS.load_config:
+    checkpoint_path = FLAGS.checkpoint_path
+    if checkpoint_path[0]!='/': checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',checkpoint_path)
+    if not os.path.isfile(checkpoint_path+'/checkpoint'):
+      checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
+    load_config(checkpoint_path)
+
   summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)
   # summary_dir = FLAGS.summary_dir
   print("summary dir: {}".format(summary_dir))
@@ -120,6 +158,8 @@ def main(_):
     state_dim = depth_estim.depth_estim_v1.input_size
   elif FLAGS.network =='mobile':
     state_dim = [1, mobile_net.mobilenet_v1.default_image_size, mobile_net.mobilenet_v1.default_image_size, 3]  
+  elif FLAGS.network =='mobile_medium':
+    state_dim = [1, mobile_net.mobilenet_v1.default_image_size_medium, mobile_net.mobilenet_v1.default_image_size_medium, 3]  
   elif FLAGS.network =='mobile_small':
     state_dim = [1, mobile_net.mobilenet_v1.default_image_size_small, mobile_net.mobilenet_v1.default_image_size_small, 3]  
   else:

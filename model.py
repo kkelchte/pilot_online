@@ -27,7 +27,7 @@ FLAGS = tf.app.flags.FLAGS
 # Weight decay of inception network
 tf.app.flags.DEFINE_float("weight_decay", 0.00001, "Weight decay of inception network")
 # Std of uniform initialization
-tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
+tf.app.flags.DEFINE_float("init_scale", 0.00004, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
 tf.app.flags.DEFINE_float("learning_rate", 0.1, "Start learning rate.")
@@ -48,9 +48,9 @@ tf.app.flags.DEFINE_float("dropout_keep_prob", 0.9, "Specify the probability of 
 tf.app.flags.DEFINE_integer("clip_grad", 0, "Specify the max gradient norm: default 0, recommended 4.")
 tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options: adam, adadelta")
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
-tf.app.flags.DEFINE_boolean("feed_previous_action", True, "Feed previous action as concatenated feature for odom prediction layers.")
+tf.app.flags.DEFINE_boolean("feed_previous_action", False, "Feed previous action as concatenated feature for odom prediction layers.")
 tf.app.flags.DEFINE_boolean("concatenate_depth", False, "Add depth prediction of 2 last frames for odometry prediction.")
-tf.app.flags.DEFINE_boolean("concatenate_odom", False, "Add odom prediction of 2 last frames for control prediction.")
+tf.app.flags.DEFINE_boolean("concatenate_odom", True, "Add odom prediction of 2 last frames for control prediction.")
 tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidden units in the odometry decision layer.")
 tf.app.flags.DEFINE_string("odom_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
 tf.app.flags.DEFINE_string("depth_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
@@ -194,8 +194,10 @@ class Model(object):
           #Define model with SLIM, second returned value are endpoints to get activations of certain nodes
           self.outputs, self.endpoints, self.auxdepth = inception.inception_v3(self.inputs, num_classes=self.output_size, 
             is_training=(not FLAGS.evaluate), dropout_keep_prob=FLAGS.dropout_keep_prob)  
-      elif FLAGS.network=='mobile' or FLAGS.network=='mobile_small':
-        depth_multiplier = 0.25 if FLAGS.network=='mobile_small' else 1
+      elif FLAGS.network=='mobile' or FLAGS.network=='mobile_small' or FLAGS.network=='mobile_medium':
+        if FLAGS.network=='mobile_small': depth_multiplier = 0.25 
+        elif FLAGS.network=='mobile_medium': depth_multiplier = 0.5 
+        else : depth_multiplier = 1 
         with slim.arg_scope(mobile_net.mobilenet_v1_arg_scope(weight_decay=FLAGS.weight_decay,
                              stddev=FLAGS.init_scale)):
           if FLAGS.n_fc:

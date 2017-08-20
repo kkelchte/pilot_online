@@ -65,8 +65,8 @@ tf.app.flags.DEFINE_float("speed", 1.3, "Define the forward speed of the quadrot
 tf.app.flags.DEFINE_float("alpha",0.,"Policy mixing: choose with a binomial chance of alpha for the experts policy.")
 
 tf.app.flags.DEFINE_boolean("off_policy",False,"In case the network is off_policy, the control is published on supervised_vel instead of cmd_vel.")
-tf.app.flags.DEFINE_boolean("show_depth",False,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
-tf.app.flags.DEFINE_boolean("show_odom",False,"Publish the predicted odometry on ./odom_prection so show_odom can visualize the estimated trajectory.")
+tf.app.flags.DEFINE_boolean("show_depth",True,"Publish the predicted horizontal depth array to topic ./depth_prection so show_depth can visualize this in another node.")
+tf.app.flags.DEFINE_boolean("show_odom",True,"Publish the predicted odometry on ./odom_prection so show_odom can visualize the estimated trajectory.")
 tf.app.flags.DEFINE_boolean("recovery_cameras",False,"Listen to recovery cameras (left-right 30-60) and add them in replay buffer.")
 tf.app.flags.DEFINE_boolean("save_input",False,"Write depth input to file in order to check values later.")
 
@@ -119,18 +119,16 @@ class PilotNode(object):
       self.depth_pub = rospy.Publisher('/depth_prediction', numpy_msg(Floats), queue_size=1)
     if FLAGS.show_odom:
       self.odom_pub = rospy.Publisher('/odom_prediction', numpy_msg(Floats), queue_size=1)
-    if FLAGS.off_policy:
-      self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
-      if rospy.has_param('control'):
-        rospy.Subscriber(rospy.get_param('control'), Twist, self.supervised_callback)
+    # if FLAGS.off_policy:
+    #   self.action_pub = rospy.Publisher('/supervised_vel', Twist, queue_size=1)
+    #   if rospy.has_param('control'):
+    #     rospy.Subscriber(rospy.get_param('control'), Twist, self.supervised_callback)
+    if FLAGS.real or FLAGS.off_policy:
+      self.action_pub=rospy.Publisher('/pilot_vel', Twist, queue_size=1)
     else:
       rospy.Subscriber('/supervised_vel', Twist, self.supervised_callback)
       if rospy.has_param('control'):
         self.action_pub = rospy.Publisher(rospy.get_param('control'), Twist, queue_size=1)
-    ### TO BE CLEANED UP
-    if FLAGS.real:
-      self.action_pub=rospy.Publisher('/pilot_vel', Twist, queue_size=1)
-
     if rospy.has_param('ready'): 
       rospy.Subscriber(rospy.get_param('ready'), Empty, self.ready_callback)
     if rospy.has_param('finished'):
@@ -167,7 +165,7 @@ class PilotNode(object):
       self.finished = False
       self.exploration_noise.reset()
       self.speed=FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
-      if rospy.has_param('evaluate') :
+      if rospy.has_param('evaluate') and not FLAGS.off_policy and not FLAGS.real:
         FLAGS.evaluate = rospy.get_param('evaluate')
       # if FLAGS.lstm:
       #   self.state=self.model.get_init_state(True)

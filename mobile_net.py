@@ -309,7 +309,7 @@ def mobilenet_v1(inputs,
       # print( str(net))
       with tf.variable_scope('aux_depth'):
         end_point = 'aux_depth_fc'
-        depth_aux_feat = tf.reshape(net,[-1,256]) if depth_multiplier==0.25 else tf.reshape(net,[-1,1024])
+        depth_aux_feat = tf.reshape(net,[-1, int(depth_multiplier*1024)])
         aux_logits=slim.fully_connected(depth_aux_feat, 4096, tf.nn.relu)
         end_points[end_point] = aux_logits
         
@@ -344,6 +344,7 @@ def mobilenet_v1(inputs,
   return logits, end_points
 
 mobilenet_v1.default_image_size = 224
+mobilenet_v1.default_image_size_medium = 160
 mobilenet_v1.default_image_size_small = 128
 
 
