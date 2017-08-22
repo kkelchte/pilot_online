@@ -149,8 +149,7 @@ class Model(object):
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.checkpoint_path)
       else:
         checkpoint_path = FLAGS.checkpoint_path
-    # import pdb; pdb.set_trace()
-
+    
     if 'fc_control' in FLAGS.network and not FLAGS.continue_training:
       init_assign_op = None
     else:
@@ -331,13 +330,16 @@ class Model(object):
     with tf.device(self.device):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       # self.loss = losses.mean_squared_error(tf.clip_by_value(self.outputs,1e-10,1.0), self.targets)
-      # if not FLAGS.rl:
-      self.loss = tf.losses.mean_squared_error(self.outputs, self.targets)
+      if not FLAGS.rl or FLAGS.auxiliary_ctr:
+        self.loss = tf.losses.mean_squared_error(self.outputs, self.targets)
+      if FLAGS.freeze:
+        FLAGS.depth_weight=0
+        FLAGS.odom_weight=0
       if FLAGS.auxiliary_depth or FLAGS.rl:
         self.depth_targets = tf.placeholder(tf.float32, [None,55,74])
       if FLAGS.auxiliary_depth:
         weights = FLAGS.depth_weight*tf.cast(tf.greater(self.depth_targets, 0), tf.float32) # put loss weight on zero where depth is negative.        
-	if FLAGS.depth_loss == 'mean_squared':
+        if FLAGS.depth_loss == 'mean_squared':
           self.depth_loss = tf.losses.mean_squared_error(self.aux_depth,self.depth_targets,weights=weights)
         elif FLAGS.depth_loss == 'absolute_difference':
           self.depth_loss = tf.losses.absolute_difference(self.aux_depth,self.depth_targets,weights=weights)
@@ -393,14 +395,19 @@ class Model(object):
           # Average over batch
           summed_cost=summed_cost+tf.matmul([costs[b]],normal_weights)[0]/FLAGS.batch_size
           # weighted_costs.append(tf.matmul(costs[b],normal_weights))
+        self.cost_to_go = summed_cost
         # grads_and_vars = [(weighted_costs[i]*gvt[0],gvt[1]) for i,gvt in enumerate(grads_and_vars)]
         grads_and_vars_output = [(summed_cost*gvt[0] if gvt[0]!=None else None,gvt[1]) for gvt in grads_and_vars_output ]
-        # grads_and_vars_loss = self.optimizer.compute_gradients(self.total_loss, tf.trainable_variables())
+        grads_and_vars_loss = self.optimizer.compute_gradients(self.total_loss, tf.trainable_variables())
         # TODO: assert that the tensors for which gradients are defined are the same !
-        # grads_and_vars = [(grads_and_vars_output[i][0]+grads_and_vars_loss[i][0] if grads_and_vars_output[i][0] != None and grads_and_vars_loss[i][0]!=None else None,
-        #   grads_and_vars_output[i][1]) for i in range(len(grads_and_vars_loss))]
-        grads_and_vars = grads_and_vars_output       
-        self.train_op = self.optimizer.apply_gradients(grads_and_vars)
+        grads_and_vars=[]
+        assert len(grads_and_vars_output) == len(grads_and_vars_loss), StandardError('gradient computations of trainable variables to output and loss are not the same!')
+        for i in range(len(grads_and_vars_output)):
+          assert grads_and_vars_output[i][1]==grads_and_vars_loss[i][1], StandardError('Gradients and variables of outputs and loss are not corresponding!')
+          grads_and_vars.append((grads_and_vars_output[i][0]+grads_and_vars_loss[i][0] if grads_and_vars_output[i][0] != None and grads_and_vars_loss[i][0]!=None else None,
+                    grads_and_vars_output[i][1]))
+        # grads_and_vars = grads_and_vars_output       
+        self.train_op = self.optimizer.apply_gradients(grads_and_vars, global_step=self.global_step)
       # Create the train_op and scale the gradients by providing a map from variable
       # name (or variable) to a scaling coefficient:
       # if FLAGS.grad_mul:
@@ -436,18 +443,17 @@ class Model(object):
       if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.pred_odom)
       feed_dict[self.prev_action] = prev_action
-    if len(targets) != 0 and not FLAGS.lstm: 
+    if len(targets) != 0 and not FLAGS.lstm and (not FLAGS.rl or FLAGS.auxiliary_ctr): 
       tensors.extend([self.total_loss, self.loss])
       feed_dict[self.targets] = targets
-    if len(target_depth) != 0 and not FLAGS.lstm: 
-      tensors.append(self.depth_loss)
+    if len(target_depth) != 0 and not FLAGS.lstm:
+      if FLAGS.auxiliary_depth: tensors.append(self.depth_loss)
       feed_dict[self.depth_targets] = target_depth
-    if len(target_odom) != 0 and not FLAGS.lstm: 
+    if len(target_odom) != 0 and not FLAGS.lstm and FLAGS.auxiliary_odom: 
       if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.odom_loss)
       feed_dict[self.odom_targets] = target_odom
       feed_dict[self.prev_action] = prev_action
-    
     results = self.sess.run(tensors, feed_dict=feed_dict)
     losses = {}
     aux_results = []
@@ -457,32 +463,31 @@ class Model(object):
       state = results.pop(0)
     if auxdepth: aux_results.append(results.pop(0))
     if auxodom: aux_results.append(results.pop(0))
-    if len(targets)!=0 and not FLAGS.lstm:
+    if len(targets) != 0 and not FLAGS.lstm and (not FLAGS.rl or FLAGS.auxiliary_ctr):
       losses['t']=results.pop(0) # total loss
       losses['c']=results.pop(0) # control loss
     if len(target_depth) != 0 and not FLAGS.lstm:
-      losses['d']=results.pop(0) # depth loss
-    if len(target_odom) != 0 and not FLAGS.lstm:
+      if FLAGS.auxiliary_depth: losses['d']=results.pop(0) # depth loss
+    if len(target_odom) != 0 and not FLAGS.lstm and FLAGS.auxiliary_odom:
       losses['o']=results.pop(0) # odometry loss
     return control, state, losses, aux_results
 
   def backward(self, inputs, initial_state=[], targets=[], depth_targets=[], odom_targets=[], prev_action=[]):
     '''run forward pass and return action prediction
     '''
-    # if not FLAGS.rl:
-    tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
-    feed_dict = {self.inputs: inputs, self.targets: targets}
-    # else:
-    #   tensors = [self.outputs, self.train_op, self.total_loss, self.loss]
-    #   feed_dict = {self.inputs: inputs}
+    tensors = [self.outputs, self.train_op, self.total_loss]
+    feed_dict = {self.inputs: inputs}
+    if not FLAGS.rl or FLAGS.auxiliary_ctr:
+      tensors.append(self.loss)
+      feed_dict[self.targets]=targets
     if FLAGS.lstm:
       assert len(initial_state)!=0
       # print 'initial_state: ',initial_state.shape
       feed_dict[self.initial_state]=initial_state
     if (FLAGS.auxiliary_depth or FLAGS.rl) and len(depth_targets)!=0:
       feed_dict[self.depth_targets] = depth_targets
-      if FLAGS.auxiliary_depth:
-        tensors.append(self.depth_loss)
+    if FLAGS.auxiliary_depth: tensors.append(self.depth_loss)
+    if FLAGS.rl: tensors.append(self.cost_to_go)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0:
       if FLAGS.feed_previous_action and len(prev_action)==0: 
         raise IOError('previous action was not provided to model.backward.') 
@@ -494,8 +499,10 @@ class Model(object):
     
     control = results.pop(0) # control always first
     _ = results.pop(0) # and train_op second
-    losses = {'t':results.pop(0),'c':results.pop(0)} # rest is losses
+    losses = {'t':results.pop(0)} # total loss
+    if not FLAGS.rl or FLAGS.auxiliary_ctr: losses['c']=results.pop(0) # control loss
     if FLAGS.auxiliary_depth and len(depth_targets)!=0: losses['d']=results.pop(0)
+    if FLAGS.rl and len(depth_targets)!=0: losses['q']=results.pop(0)
     if FLAGS.auxiliary_odom and len(odom_targets)!=0: losses['o']=results.pop(0)
     
     return control, losses
@@ -646,10 +653,12 @@ class Model(object):
     self.add_summary_var("Loss_control")
     self.add_summary_var("Loss_depth")
     self.add_summary_var("Loss_odom")
+    self.add_summary_var("Loss_q")
     self.add_summary_var("Loss_total_eva")
     self.add_summary_var("Loss_control_eva")
     self.add_summary_var("Loss_depth_eva")
     self.add_summary_var("Loss_odom_eva")
+    self.add_summary_var("Loss_q_eva")
     self.add_summary_var("odom_errx")
     self.add_summary_var("odom_erry")
     self.add_summary_var("odom_errz")

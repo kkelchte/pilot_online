@@ -61,6 +61,7 @@ tf.app.flags.DEFINE_boolean("launch_ros", False, "Launch ros with simulation_sup
 tf.app.flags.DEFINE_boolean("evaluate", False, "Just evaluate the network without training.")
 tf.app.flags.DEFINE_string("network", 'mobile_small', "Define the type of network: inception / fc_control / depth / mobile / mobile_small.")
 tf.app.flags.DEFINE_boolean("auxiliary_depth", True, "Specify whether a depth map is predicted.")
+tf.app.flags.DEFINE_boolean("auxiliary_ctr", False, "Specify whether control should be predicted besides RL.")
 tf.app.flags.DEFINE_boolean("auxiliary_odom", True, "Specify whether the odometry or change in x,y,z,Y is predicted.")
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 tf.app.flags.DEFINE_boolean("lstm", False, "In case of True, cnn-features are fed into LSTM control layers.")
@@ -158,10 +159,10 @@ def main(_):
     state_dim = depth_estim.depth_estim_v1.input_size
   elif FLAGS.network =='mobile':
     state_dim = [1, mobile_net.mobilenet_v1.default_image_size, mobile_net.mobilenet_v1.default_image_size, 3]  
-  elif FLAGS.network =='mobile_medium':
-    state_dim = [1, mobile_net.mobilenet_v1.default_image_size_medium, mobile_net.mobilenet_v1.default_image_size_medium, 3]  
   elif FLAGS.network =='mobile_small':
     state_dim = [1, mobile_net.mobilenet_v1.default_image_size_small, mobile_net.mobilenet_v1.default_image_size_small, 3]  
+  elif FLAGS.network =='mobile_medium':
+    state_dim = [1, mobile_net.mobilenet_v1.default_image_size_medium, mobile_net.mobilenet_v1.default_image_size_medium, 3]  
   else:
     raise NameError( 'Network is unknown: ', FLAGS.network)
     

@@ -167,6 +167,7 @@ class PilotNode(object):
       self.speed=FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       if rospy.has_param('evaluate') and not FLAGS.off_policy and not FLAGS.real:
         FLAGS.evaluate = rospy.get_param('evaluate')
+        # print '--> set evaluate to: ',FLAGS.evaluate
       # if FLAGS.lstm:
       #   self.state=self.model.get_init_state(True)
       #   print 'set state to: ', self.state  
@@ -286,6 +287,8 @@ class PilotNode(object):
   def depth_callback(self, msg):
     im = self.process_depth(msg)
     if len(im)!=0: 
+      if FLAGS.auxiliary_depth or FLAGS.rl:
+        self.target_depth = im #(64,)
       if FLAGS.depth_input:
         if FLAGS.network == 'nfc_control':
           self.nfc_images.append(im)
@@ -298,8 +301,6 @@ class PilotNode(object):
             # print im.shape
             self.nfc_images.pop(0)
         self.process_input(im)
-      if FLAGS.auxiliary_depth or FLAGS.rl:
-        self.target_depth = im #(64,)
         
   def depth_callback_recovery(self, msg, args):
     im = self.process_depth(msg)
@@ -500,7 +501,8 @@ class PilotNode(object):
       closs = [] #control loss
       dloss = [] #depth loss
       oloss = [] #odometry loss
-      tlossm, clossm, dlossm, olossm, tlossm_eva, clossm_eva, dlossm_eva, olossm_eva = 0,0,0,0,0,0,0,0
+      qloss = [] #RL cost-to-go loss
+      tlossm, clossm, dlossm, olossm, qlossm, tlossm_eva, clossm_eva, dlossm_eva, olossm_eva, qlossm_eva = 0,0,0,0,0,0,0,0,0,0
       #tot_batch_loss = []
       if FLAGS.experience_replay and self.replay_buffer.size()>(FLAGS.batch_size if not FLAGS.lstm else FLAGS.batch_size*FLAGS.num_steps) and not FLAGS.evaluate:
         for b in range(min(int(self.replay_buffer.size()/FLAGS.batch_size), 10)):
@@ -536,21 +538,22 @@ class PilotNode(object):
           # todo add initial state for each rollout in the batch
           controls, losses = self.model.backward(inputs,init_state,targets[:].reshape(-1,1),depth_targets, odom_targets, prev_action)
           tloss = losses['t']
-          closs = losses['c']
+          if not FLAGS.rl or FLAGS.auxiliary_ctr: closs = losses['c']
           if FLAGS.auxiliary_depth: dloss.append(losses['d'])
           if FLAGS.auxiliary_odom: oloss.append(losses['o'])
+          if FLAGS.rl : qloss.append(losses['q'])
         tlossm = np.mean(tloss)
-        clossm = np.mean(closs)
-        dlossm = 0
-        olossm = 0
-        if FLAGS.auxiliary_depth: dlossm = np.mean(dloss)
-        if FLAGS.auxiliary_odom: olossm = np.mean(oloss)
+        clossm = np.mean(closs) if not FLAGS.rl or FLAGS.auxiliary_ctr else 0
+        dlossm = np.mean(dloss) if FLAGS.auxiliary_depth else 0
+        olossm = np.mean(oloss) if FLAGS.auxiliary_odom else 0
+        qlossm = np.mean(qloss) if FLAGS.rl else 0
       else:
         print('Evaluating or filling buffer or no experience_replay: ', self.replay_buffer.size())
         if 't' in self.accumlosses.keys() : tlossm_eva = self.accumlosses['t']
         if 'c' in self.accumlosses.keys() : clossm_eva = self.accumlosses['c']
         if 'd' in self.accumlosses.keys() : dlossm_eva = self.accumlosses['d']
         if 'o' in self.accumlosses.keys() : olossm_eva = self.accumlosses['o']
+        if 'q' in self.accumlosses.keys() : qlossm_eva = self.accumlosses['q']
 
       if not FLAGS.evaluate:
         self.average_distance = self.average_distance-self.average_distance/(self.run+1)
@@ -578,10 +581,12 @@ class PilotNode(object):
         if clossm != 0 : sumvar["Loss_control"]=clossm 
         if dlossm != 0 : sumvar["Loss_depth"]=dlossm 
         if olossm != 0 : sumvar["Loss_odom"]=olossm 
+        if qlossm != 0 : sumvar["Loss_q"]=qlossm 
         if tlossm_eva != 0 : sumvar["Loss_total_eva"]=tlossm_eva
         if clossm_eva != 0 : sumvar["Loss_control_eva"]=clossm_eva 
         if dlossm_eva != 0 : sumvar["Loss_depth_eva"]=dlossm_eva 
         if olossm_eva != 0 : sumvar["Loss_odom_eva"]=olossm_eva 
+        if qlossm_eva != 0 : sumvar["Loss_q_eva"]=qlossm_eva 
         if odom_errx != 0 : sumvar["odom_errx"]=odom_errx 
         if odom_erry != 0 : sumvar["odom_erry"]=odom_erry 
         if odom_errz != 0 : sumvar["odom_errz"]=odom_errz 
@@ -601,14 +606,15 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, world: {9}'.format(time.strftime('%H:%M'), 
+        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, q loss: {9:0.3f}, world: {10}'.format(time.strftime('%H:%M'), 
           self.run if not FLAGS.evaluate else self.run_eva, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
-          self.furthest_point, tlossm if not FLAGS.evaluate else tlossm_eva, clossm if not FLAGS.evaluate else clossm_eva, dlossm if not FLAGS.evaluate else dlossm_eva, olossm if not FLAGS.evaluate else olossm_eva, self.world_name))
+          self.furthest_point, tlossm if not FLAGS.evaluate else tlossm_eva, clossm if not FLAGS.evaluate else clossm_eva, dlossm if not FLAGS.evaluate else dlossm_eva, olossm if not FLAGS.evaluate else olossm_eva, 
+          qlossm if not FLAGS.evaluate else qlossm_eva, self.world_name))
         l_file = open(self.logfile,'a')
         tag='train'
         if FLAGS.evaluate:
           tag='val'
-        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9}\n'.format(
+        l_file.write('{0} {1} {2} {3} {4} {5} {6} {7} {8} {9} {10}\n'.format(
             self.run if not FLAGS.evaluate else self.run_eva, 
           self.current_distance, 
           self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
@@ -617,6 +623,7 @@ class PilotNode(object):
           clossm,
           dlossm,
           olossm,
+          qlossm,
           tag,
           self.world_name))
         l_file.close()
