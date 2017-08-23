@@ -330,7 +330,7 @@ class PilotNode(object):
         trgt_odom = [copy.deepcopy(self.target_odom)]
         trgt_depth = [copy.deepcopy(self.target_depth)]
         with_loss = True
-      if with_loss:
+      if with_loss and False: # for now skip calculating accumulated loses.
         prev_ctr = [[self.prev_control[0]]]
         control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state, 
           auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr, 
