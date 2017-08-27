@@ -98,6 +98,10 @@ import tensorflow as tf
 
 slim = tf.contrib.slim
 
+FLAGS = tf.app.flags.FLAGS
+
+tf.app.flags.DEFINE_string("initializer", 'xavier', "Define the initializer: xavier or uniform [-init_scale, init_scale]")
+
 # Conv and DepthSepConv namedtuple define layers of the MobileNet architecture
 # Conv defines 3x3 convolution layers
 # DepthSepConv defines 3x3 depthwise convolution followed by 1x1 convolution.
@@ -389,8 +393,11 @@ def mobilenet_v1_arg_scope(is_training=True,
   }
 
   # Set weight_decay for weights in Conv and DepthSepConv layers.
-  weights_init = tf.truncated_normal_initializer(stddev=stddev)
+  weights_init = tf.contrib.layers.xavier_initializer() if FLAGS.initializer=='xavier' else tf.truncated_normal_initializer(stddev=stddev)
+
+  # weights_init = tf.truncated_normal_initializer(stddev=stddev)
   regularizer = tf.contrib.layers.l2_regularizer(weight_decay)
+  
   if regularize_depthwise:
     depthwise_regularizer = regularizer
   else:
