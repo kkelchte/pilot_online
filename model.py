@@ -659,12 +659,14 @@ class Model(object):
     self.summary_ops = {}
     # self.summary_vars = []
     self.add_summary_var("Distance_current")
+    self.add_summary_var("Distance_current_forest_real")
     self.add_summary_var("Distance_current_sandbox")
     self.add_summary_var("Distance_current_forest")
     self.add_summary_var("Distance_current_canyon")
     self.add_summary_var("Distance_current_esat_corridor_v1")
     self.add_summary_var("Distance_current_esat_corridor_v2")
     self.add_summary_var("Distance_furthest")
+    self.add_summary_var("Distance_furthest_forest_real")
     self.add_summary_var("Distance_furthest_sandbox")
     self.add_summary_var("Distance_furthest_forest")
     self.add_summary_var("Distance_furthest_canyon")

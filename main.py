@@ -177,9 +177,10 @@ def main(_):
   # targets=random_ops.random_uniform((1,action_dim))
   # depth_targets=random_ops.random_uniform((1,1,1,64))
   
-  gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.7)
-  config=tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
-  config.gpu_options.allow_growth = True
+  # gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.7)
+  # config=tf.ConfigProto(allow_soft_placement=True, gpu_options=gpu_options)
+  config=tf.ConfigProto(allow_soft_placement=True)
+  config.gpu_options.allow_growth = False
   sess = tf.Session(config=config)
   model = Model(sess, state_dim, action_dim, bound=FLAGS.action_bound)
   writer = tf.summary.FileWriter(summary_dir+FLAGS.log_tag, sess.graph)
