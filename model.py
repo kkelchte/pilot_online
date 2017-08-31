@@ -459,9 +459,9 @@ class Model(object):
       tensors.append(self.state)
     else:
       feed_dict={self.inputs: inputs}
-    if auxdepth: 
+    if auxdepth and FLAGS.auxiliary_depth: 
       tensors.append(self.pred_depth)
-    if auxodom:
+    if auxodom and FLAGS.auxiliary_odom:
       if len(prev_action)==0 and FLAGS.feed_previous_action: raise IOError('previous action was not provided to model.forward.') 
       tensors.append(self.pred_odom)
       feed_dict[self.prev_action] = prev_action
@@ -479,13 +479,13 @@ class Model(object):
     
     results = self.sess.run(tensors, feed_dict=feed_dict)
     losses = {}
-    aux_results = []
+    aux_results = {}
     state = []
     control = results.pop(0)
     if FLAGS.lstm: 
       state = results.pop(0)
-    if auxdepth: aux_results.append(results.pop(0))
-    if auxodom: aux_results.append(results.pop(0))
+    if auxdepth and FLAGS.auxiliary_depth: aux_results['depth']=results.pop(0)
+    if auxodom and FLAGS.auxiliary_odom: aux_results['odom']=results.pop(0)
     if len(targets) != 0 and not FLAGS.lstm and (not FLAGS.rl or FLAGS.auxiliary_ctr):
       losses['t']=results.pop(0) # total loss
       losses['c']=results.pop(0) # control loss

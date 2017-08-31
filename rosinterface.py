@@ -165,9 +165,9 @@ class PilotNode(object):
       self.finished = False
       self.exploration_noise.reset()
       self.speed=FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
-      if rospy.has_param('evaluate') and not FLAGS.off_policy and not FLAGS.real:
+      if rospy.has_param('evaluate') and not FLAGS.real:
         FLAGS.evaluate = rospy.get_param('evaluate')
-        # print '--> set evaluate to: ',FLAGS.evaluate
+        print '--> set evaluate to: ',FLAGS.evaluate
       # if FLAGS.lstm:
       #   self.state=self.model.get_init_state(True)
       #   print 'set state to: ', self.state  
@@ -344,9 +344,8 @@ class PilotNode(object):
         prev_ctr = [[self.prev_control[0]]]
         control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state, auxdepth=FLAGS.show_depth, 
           auxodom=FLAGS.show_odom, prev_action=prev_ctr)
-      if FLAGS.show_depth and FLAGS.auxiliary_depth and len(aux_results)>0: self.aux_depth = aux_results.pop(0)
-      if FLAGS.show_odom and FLAGS.auxiliary_odom and len(aux_results)>0: self.aux_odom = aux_results.pop(0)
-    
+      if FLAGS.show_depth and FLAGS.auxiliary_depth and len(aux_results)>0: self.aux_depth = aux_results['depth']
+      if FLAGS.show_odom and FLAGS.auxiliary_odom and len(aux_results)>0: self.aux_odom = aux_results['odom']
     else: ###TRAINING
       # Get necessary labels, if label is missing wait...
       if len(self.target_control) == 0:
@@ -423,8 +422,8 @@ class PilotNode(object):
       self.aux_depth = self.aux_depth.flatten()
       self.depth_pub.publish(self.aux_depth)
       self.aux_depth = []
-    if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished and len(trgt_odom)!=0:
-      # debug odom by checking image + odometry correspondences:
+    if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished:
+      trgt_odom = [copy.deepcopy(self.target_odom)]
       # final_img = cv2.hconcat((im[:,:,0:3], im[:,:,3:6],im[:,:,6:]))
       # final_img = cv2.hconcat((im[:,:,[2,1,0]], im[:,:,[5,4,3]],im[:,:,[8,7,6]]))
       # print trgt_odom

@@ -391,6 +391,7 @@ def mobilenet_v1_arg_scope(is_training=True,
       'decay': 0.9997,
       'epsilon': 0.001,
   }
+  tf.set_random_seed(FLAGS.random_seed)
 
   # Set weight_decay for weights in Conv and DepthSepConv layers.
   weights_init = tf.contrib.layers.xavier_initializer() if FLAGS.initializer=='xavier' else tf.truncated_normal_initializer(stddev=stddev)
