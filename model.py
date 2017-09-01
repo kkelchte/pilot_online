@@ -32,7 +32,7 @@ tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Start learning rate.")
 tf.app.flags.DEFINE_float("depth_weight", 1, "Define the weight applied to the depth values in the loss relative to the control loss.")
-tf.app.flags.DEFINE_float("odom_weight", 0.01, "Define the weight applied to the odometry values in the loss relative to the control loss.")
+tf.app.flags.DEFINE_float("odom_weight", 1, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", 'mobilenet_small', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
 # tf.app.flags.DEFINE_string("model_path", '/users/visics/kkelchte/tensorflow/models', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
@@ -50,11 +50,12 @@ tf.app.flags.DEFINE_string("optimizer", 'adadelta', "Specify optimizer, options:
 tf.app.flags.DEFINE_boolean("plot_histograms", False, "Specify whether to plot histograms of the weights.")
 tf.app.flags.DEFINE_boolean("feed_previous_action", False, "Feed previous action as concatenated feature for odom prediction layers.")
 tf.app.flags.DEFINE_boolean("concatenate_depth", False, "Add depth prediction of 2 last frames for odometry prediction.")
-tf.app.flags.DEFINE_boolean("concatenate_odom", True, "Add odom prediction of 2 last frames for control prediction.")
+tf.app.flags.DEFINE_boolean("concatenate_odom", False, "Add odom prediction of 2 last frames for control prediction.")
 tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidden units in the odometry decision layer.")
 tf.app.flags.DEFINE_string("odom_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
 tf.app.flags.DEFINE_string("depth_loss", 'huber', "absolute_difference or mean_squared or huber")
 tf.app.flags.DEFINE_string("no_batchnorm_learning", True, "In case of no batchnorm learning, are the batch normalization params (alphas and betas) not learned")
+tf.app.flags.DEFINE_boolean("extra_control_layer", False, "Add an extra hidden control layer with 50 units in case of n_fc.")
 
 """
 Build basic NN model
@@ -219,9 +220,12 @@ class Model(object):
             with tf.variable_scope('aux_odom', reuse=not is_training):
               aux_odom_input = tf.concat([features,self.prev_action], axis=1) if FLAGS.feed_previous_action else features
               aux_odom_logits = slim.fully_connected(aux_odom_input, FLAGS.odom_hidden_units, tf.nn.relu, normalizer_fn=None, scope='Fc_aux_odom')
-              aux_odom = slim.fully_connected(aux_odom_logits, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
+              aux_odom = slim.fully_connected(aux_odom_logits, 6, None, normalizer_fn=None, scope='Fc_aux_odom_1')
+              # aux_odom = slim.fully_connected(aux_odom_logits, 4, None, normalizer_fn=None, scope='Fc_aux_odom_1')
             with tf.variable_scope('control', reuse=not is_training):  
               control_input = features if not FLAGS.concatenate_odom else tf.concat([features,aux_odom_logits],axis=1)
+              if FLAGS.extra_control_layer:
+                control_input = slim.fully_connected(control_input, 50, tf.nn.relu, normalizer_fn=None, scope='H_fc_control')
               outputs = slim.fully_connected(control_input, 1, None, normalizer_fn=None, scope='Fc_control')
             aux_depth = endpoints['aux_depth_reshaped']
             return outputs, aux_depth, aux_odom, endpoints
@@ -360,7 +364,8 @@ class Model(object):
         else :
           raise 'Depth loss is unknown: {}'.format(FLAGS.depth_loss)
       if FLAGS.auxiliary_odom:
-        self.odom_targets = tf.placeholder(tf.float32, [None,4])
+        self.odom_targets = tf.placeholder(tf.float32, [None,6])
+        # self.odom_targets = tf.placeholder(tf.float32, [None,4])
         if FLAGS.odom_loss == 'absolute_difference':
           self.odom_loss = tf.losses.absolute_difference(self.aux_odom,self.odom_targets,weights=FLAGS.odom_weight)
         elif FLAGS.odom_loss == 'mean_squared':
@@ -650,7 +655,7 @@ class Model(object):
     #self.saver.save(self.sess, logfolder+'/my-model')
 
   def add_summary_var(self, name):
-    var_name = tf.Variable(0.)
+    var_name = tf.Variable(0., name=name)
     self.summary_vars[name]=var_name
     self.summary_ops[name] = tf.summary.scalar(name, var_name)
     

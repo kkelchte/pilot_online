@@ -40,6 +40,9 @@ from nav_msgs.msg import Odometry
 
 from ou_noise import OUNoise
 
+from tf import transformations
+
+
 #from PIL import Image
 
 FLAGS = tf.app.flags.FLAGS
@@ -97,7 +100,7 @@ class PilotNode(object):
     self.furthest_point=0
     self.average_distance=0
     self.average_distance_eva=0
-    self.last_position=[]
+    self.last_pose=[]
     self.model = model
     self.ready=False 
     self.finished=True
@@ -109,7 +112,7 @@ class PilotNode(object):
     self.odom_error = []
     self.prev_control = [0]
     self.nfc_images =[] #used by n_fc networks for building up concatenated frames
-    self.nfc_positions =[] #used by n_fc networks for calculating odometry
+    self.nfc_poses =[] #used by n_fc networks for calculating odometry
     rospy.init_node('pilot', anonymous=True)
     self.exploration_noise = OUNoise(4, 0, FLAGS.ou_theta,1)
     self.state = []
@@ -177,17 +180,23 @@ class PilotNode(object):
     
   def gt_callback(self, data):
     if not self.ready: return
+    # Keep track of positions for logging
+
     current_pos=[data.pose.pose.position.x,
                     data.pose.pose.position.y,
-                    data.pose.pose.position.z,
-                    data.pose.pose.orientation.z]
-    if len(self.last_position)!= 0:
-        self.current_distance += np.sqrt((self.last_position[0]-current_pos[0])**2+(self.last_position[1]-current_pos[1])**2)
+                    data.pose.pose.position.z]
+    if len(self.last_pose)!= 0:
+        self.current_distance += np.sqrt((self.last_pose[0,3]-current_pos[0])**2+(self.last_pose[1,3]-current_pos[1])**2)
     self.furthest_point=max([self.furthest_point, np.sqrt(current_pos[0]**2+current_pos[1]**2)])
-      
-    self.last_position=current_pos
-    # print(self.furthest_point)
-  
+    
+    # Get pose (rotation and translation) for odometry
+    quaternion = (data.pose.pose.orientation.x,
+      data.pose.pose.orientation.y,
+      data.pose.pose.orientation.z,
+      data.pose.pose.orientation.w)
+    self.last_pose = transformations.quaternion_matrix(quaternion) # orientation of current frame relative to global frame
+    self.last_pose[0:3,3]=current_pos
+
   def process_rgb(self, msg):
     # self.time_1 = time.time()
     # if not self.ready or self.finished or (rospy.get_time()-self.start_time) < self.delay_evaluation: return
@@ -247,7 +256,7 @@ class PilotNode(object):
     if len(im)!=0: 
       if FLAGS.n_fc:
         self.nfc_images.append(im)
-        self.nfc_positions.append(self.last_position[:])
+        self.nfc_poses.append(copy.deepcopy(self.last_pose))
         if len(self.nfc_images) < FLAGS.n_frames:
           # print('filling concatenated frames: ',len(self.nfc_images))
           return
@@ -256,9 +265,20 @@ class PilotNode(object):
           im = np.concatenate(np.asarray(self.nfc_images[-FLAGS.n_frames:]),axis=2)
           self.nfc_images = self.nfc_images[-FLAGS.n_frames+1:] # concatenate last n-1-frames
 
-          self.nfc_positions.pop(0) #get rid of the first one
-          assert len(self.nfc_positions) == FLAGS.n_frames-1
-          self.target_odom = [self.nfc_positions[1][i]-self.nfc_positions[0][i] for i in range(len(self.nfc_positions[0]))]
+          self.nfc_poses.pop(0) #get rid of the first one
+          assert len(self.nfc_poses) == FLAGS.n_frames-1
+          # calculate target odometry from previous global pose and current global pose
+          euler = transformations.euler_from_matrix(self.nfc_poses[1], 'rxyz')
+          # print 'current: ',str(euler[2]),str(self.nfc_poses[1][0,3]),str(self.nfc_poses[1][1,3])
+          i_T_pg = transformations.inverse_matrix(self.nfc_poses[0])
+          euler = transformations.euler_from_matrix(i_T_pg, 'rxyz')
+          # print 'inverse prev: ',str(euler[2]), str(i_T_pg[0,3]),str(i_T_pg[1,3])
+          T_cp = transformations.concatenate_matrices(i_T_pg, self.nfc_poses[1])
+          r,p,yw = transformations.euler_from_matrix(T_cp, 'rxyz')
+          x,y,z = T_cp[0:3,3]
+          self.target_odom = [x,y,z,r,p,yw]
+          # print 'odom: ',str(self.target_odom[5]),str(self.target_odom[0]),str(self.target_odom[1])
+          # self.target_odom = [self.nfc_poses[1][i]-self.nfc_poses[0][i] for i in range(len(self.nfc_poses[0]))]
           # print 'Target odometry: ', self.target_odom 
       self.process_input(im)
 
@@ -386,8 +406,8 @@ class PilotNode(object):
 
       control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state , 
         auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
-      if FLAGS.show_depth: self.aux_depth = aux_results.pop(0)
-      if FLAGS.show_odom: self.aux_odom = aux_results.pop(0)
+      if FLAGS.show_depth: self.aux_depth = aux_results['depth']
+      if FLAGS.show_odom: self.aux_odom = aux_results['odom']
       self.time_5 = time.time()
       # print 'state: ', self.state
     ### SEND CONTROL
@@ -423,7 +443,7 @@ class PilotNode(object):
       self.depth_pub.publish(self.aux_depth)
       self.aux_depth = []
     if FLAGS.show_odom and len(self.aux_odom) != 0 and not self.finished:
-      trgt_odom = [copy.deepcopy(self.target_odom)]
+      # trgt_odom = [copy.deepcopy(self.target_odom)]
       # final_img = cv2.hconcat((im[:,:,0:3], im[:,:,3:6],im[:,:,6:]))
       # final_img = cv2.hconcat((im[:,:,[2,1,0]], im[:,:,[5,4,3]],im[:,:,[8,7,6]]))
       # print trgt_odom
@@ -434,7 +454,7 @@ class PilotNode(object):
       # self.odom_pub.publish(self.aux_odom.flatten())
       # print concat_odoms[4:6],' and ',concat_odoms[0:2]
       self.odom_pub.publish(concat_odoms.astype(np.float32))
-      self.odom_error.append(np.abs(np.array(trgt_odom).flatten()-self.aux_odom.flatten()))
+      # self.odom_error.append(np.abs(np.array(trgt_odom).flatten()-self.aux_odom.flatten()))
       self.aux_odom = []
       
     # ADD EXPERIENCE REPLAY
@@ -443,6 +463,8 @@ class PilotNode(object):
       if FLAGS.auxiliary_depth or FLAGS.rl: 
         aux_info['target_depth']=trgt_depth
       if FLAGS.auxiliary_odom: 
+        # print trgt_odom
+        # print 'target odom ',trgt_odom
         aux_info['target_odom']=trgt_odom
         aux_info['prev_action']=prev_ctr
       if FLAGS.lstm:
@@ -532,7 +554,7 @@ class PilotNode(object):
             depth_targets=aux_info['target_depth'].reshape(-1,55,74)
             # depth_targets=aux_info['target_depth'].reshape(-1,55,74) if not FLAGS.lstm else aux_info['target_depth'].reshape(-1,FLAGS.num_steps, 55,74)
           if FLAGS.auxiliary_odom: 
-            odom_targets=aux_info['target_odom'].reshape(-1,4) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 4)
+            odom_targets=aux_info['target_odom'].reshape(-1,6) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 6)
             prev_action=aux_info['prev_action'].reshape(-1,1) #if not FLAGS.lstm else aux_info['prev_action'].reshape(-1,FLAGS.num_steps, 1)
           # todo add initial state for each rollout in the batch
           controls, losses = self.model.backward(inputs,init_state,targets[:].reshape(-1,1),depth_targets, odom_targets, prev_action)
@@ -629,9 +651,9 @@ class PilotNode(object):
       self.accumlosses = {}
       self.maxy = -10
       self.current_distance = 0
-      self.last_position = []
+      self.last_pose = []
       self.nfc_images = []
-      self.nfc_positions = []
+      self.nfc_poses = []
       self.furthest_point = 0
       if FLAGS.lstm and not FLAGS.evaluate: self.replay_buffer.new_run()
       self.world_name = ''
