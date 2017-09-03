@@ -128,7 +128,7 @@ def main(_):
     checkpoint_path = FLAGS.checkpoint_path
     if checkpoint_path[0]!='/': checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',checkpoint_path)
     if not os.path.isfile(checkpoint_path+'/checkpoint'):
-      checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
+      checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
     load_config(checkpoint_path)
 
   summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)

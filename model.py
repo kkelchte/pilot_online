@@ -31,7 +31,7 @@ tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
 tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Start learning rate.")
-tf.app.flags.DEFINE_float("depth_weight", 1, "Define the weight applied to the depth values in the loss relative to the control loss.")
+tf.app.flags.DEFINE_float("depth_weight", 10, "Define the weight applied to the depth values in the loss relative to the control loss.")
 tf.app.flags.DEFINE_float("odom_weight", 1, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", 'mobilenet_small', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
@@ -55,7 +55,7 @@ tf.app.flags.DEFINE_integer("odom_hidden_units", 50, "Define the number of hidde
 tf.app.flags.DEFINE_string("odom_loss", 'mean_squared', "absolute_difference or mean_squared or huber")
 tf.app.flags.DEFINE_string("depth_loss", 'huber', "absolute_difference or mean_squared or huber")
 tf.app.flags.DEFINE_string("no_batchnorm_learning", True, "In case of no batchnorm learning, are the batch normalization params (alphas and betas) not learned")
-tf.app.flags.DEFINE_boolean("extra_control_layer", False, "Add an extra hidden control layer with 50 units in case of n_fc.")
+tf.app.flags.DEFINE_boolean("extra_control_layer", True, "Add an extra hidden control layer with 50 units in case of n_fc.")
 
 """
 Build basic NN model
@@ -157,7 +157,8 @@ class Model(object):
     else:
       # get latest folder out of training directory if there is no checkpoint file
       if not os.path.isfile(checkpoint_path+'/checkpoint'):
-        checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
+        checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
+        # checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and not mpath[-3:]=='val' and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
       print('checkpoint: {}'.format(checkpoint_path))
       init_assign_op, init_feed_dict = slim.assign_from_checkpoint(tf.train.latest_checkpoint(checkpoint_path), variables_to_restore)
   

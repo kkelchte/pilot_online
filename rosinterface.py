@@ -267,16 +267,16 @@ class PilotNode(object):
 
           self.nfc_poses.pop(0) #get rid of the first one
           assert len(self.nfc_poses) == FLAGS.n_frames-1
-          # calculate target odometry from previous global pose and current global pose
-          euler = transformations.euler_from_matrix(self.nfc_poses[1], 'rxyz')
-          # print 'current: ',str(euler[2]),str(self.nfc_poses[1][0,3]),str(self.nfc_poses[1][1,3])
-          i_T_pg = transformations.inverse_matrix(self.nfc_poses[0])
-          euler = transformations.euler_from_matrix(i_T_pg, 'rxyz')
-          # print 'inverse prev: ',str(euler[2]), str(i_T_pg[0,3]),str(i_T_pg[1,3])
-          T_cp = transformations.concatenate_matrices(i_T_pg, self.nfc_poses[1])
-          r,p,yw = transformations.euler_from_matrix(T_cp, 'rxyz')
-          x,y,z = T_cp[0:3,3]
-          self.target_odom = [x,y,z,r,p,yw]
+          # # calculate target odometry from previous global pose and current global pose
+          # euler = transformations.euler_from_matrix(self.nfc_poses[1], 'rxyz')
+          # # print 'current: ',str(euler[2]),str(self.nfc_poses[1][0,3]),str(self.nfc_poses[1][1,3])
+          # i_T_pg = transformations.inverse_matrix(self.nfc_poses[0])
+          # euler = transformations.euler_from_matrix(i_T_pg, 'rxyz')
+          # # print 'inverse prev: ',str(euler[2]), str(i_T_pg[0,3]),str(i_T_pg[1,3])
+          # T_cp = transformations.concatenate_matrices(i_T_pg, self.nfc_poses[1])
+          # r,p,yw = transformations.euler_from_matrix(T_cp, 'rxyz')
+          # x,y,z = T_cp[0:3,3]
+          # self.target_odom = [x,y,z,r,p,yw]
           # print 'odom: ',str(self.target_odom[5]),str(self.target_odom[0]),str(self.target_odom[1])
           # self.target_odom = [self.nfc_poses[1][i]-self.nfc_poses[0][i] for i in range(len(self.nfc_poses[0]))]
           # print 'Target odometry: ', self.target_odom 
@@ -406,8 +406,8 @@ class PilotNode(object):
 
       control, self.state, losses, aux_results = self.model.forward([[im]] if FLAGS.lstm else [im], states=self.state , 
         auxdepth=FLAGS.show_depth, auxodom=FLAGS.show_odom, prev_action=prev_ctr)
-      if FLAGS.show_depth: self.aux_depth = aux_results['depth']
-      if FLAGS.show_odom: self.aux_odom = aux_results['odom']
+      if FLAGS.show_depth and FLAGS.auxiliary_depth: self.aux_depth = aux_results['depth']
+      if FLAGS.show_odom and FLAGS.auxiliary_odom: self.aux_odom = aux_results['odom']
       self.time_5 = time.time()
       # print 'state: ', self.state
     ### SEND CONTROL
@@ -627,7 +627,7 @@ class PilotNode(object):
         print('failed to write', e)
         pass
       else:
-        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3f}, depth loss: {7:0.3f}, odom loss: {8:0.3f}, q loss: {9:0.3f}, world: {10}'.format(time.strftime('%H:%M'), 
+        print('{0}: control finished {1}:[ current_distance: {2:0.3f}, average_distance: {3:0.3f}, furthest point: {4:0.1f}, total loss: {5:0.3f}, control loss: {6:0.3e}, depth loss: {7:0.3e}, odom loss: {8:0.3e}, q loss: {9:0.3e}, world: {10}'.format(time.strftime('%H:%M'), 
           self.run if not FLAGS.evaluate else self.run_eva, self.current_distance, self.average_distance if not FLAGS.evaluate else self.average_distance_eva, 
           self.furthest_point, tlossm if not FLAGS.evaluate else tlossm_eva, clossm if not FLAGS.evaluate else clossm_eva, dlossm if not FLAGS.evaluate else dlossm_eva, olossm if not FLAGS.evaluate else olossm_eva, 
           qlossm if not FLAGS.evaluate else qlossm_eva, self.world_name))
