@@ -1,7 +1,7 @@
 # Pilot_online
 The Pilot online package is a Tensorflow package used for online training.
 The online training happens by interacting with the [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised)
-package in ROS and Gazebo.
+package in ROS and Gazebo. It is used in the [DoShiCo challenge](https://kkelchte.github.io/doshico)
 
 ## Dependencies
 * [Tensorflow (>1.1)](https://www.tensorflow.org/install/) or [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/) up and running.
