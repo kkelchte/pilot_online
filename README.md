@@ -1,16 +1,16 @@
 # Pilot_online
 The Pilot online package is a Tensorflow package used for online training.
-The online training happens by interacting with the [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised){:target="_blank"}
+The online training happens by interacting with the [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised)
 package in ROS and Gazebo.
 
 ## Dependencies
-* [Tensorflow (>1.1)](https://www.tensorflow.org/install/) or [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/){:target="_blank"} up and running.
-* [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised){:target="_blank"}
+* [Tensorflow (>1.1)](https://www.tensorflow.org/install/) or [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/) up and running.
+* [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised)
 * [log]("https://homes.esat.kuleuven.be/~kkelchte/checkpoints/models.zip"): this directory contains checkpoints of trained models, required to reproduce results.
 
 
 ## Installation
-You can use this code from within the [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/){:target="_blank"} I supply for the [Doshico challenge](http://kkelchte.github.io/doshico){:target="_blank"}.
+You can use this code from within the [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/) I supply for the [Doshico challenge](http://kkelchte.github.io/doshico).
 ```bash
 $ git clone https://www.github.com/kkelchte/pilot_online
 # within a running docker container
