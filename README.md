@@ -6,7 +6,7 @@ package in ROS and Gazebo.
 ## Dependencies
 * [Tensorflow (>1.1)](https://www.tensorflow.org/install/) or [docker image](https://hub.docker.com/r/kkelchte/ros_gazebo_tensorflow/){:target="_blank"} up and running.
 * [simulation-supervised](https://www.github.com/kkelchte/simulation-supervised){:target="_blank"}
-* log: this directory contains checkpoints of trained models, required to reproduce results.
+* [log]("https://homes.esat.kuleuven.be/~kkelchte/checkpoints/models.zip"): this directory contains checkpoints of trained models, required to reproduce results.
 
 
 ## Installation
@@ -22,5 +22,5 @@ checkpoint: /home/klaas/tensorflow/log/mobilenet_small
 ```
 In order to make it work, you can either adjust some default flag values or adapt the same folder structure.
 * summary_dir (main.py): log folder to keep checkpoints and log info: $HOME/tensorflow/log
-* checkpoint_path (model.py): log folder from which checkpoints of models are read from: $HOME/tensorflow/log
+* checkpoint_path (model.py): [log]("https://homes.esat.kuleuven.be/~kkelchte/checkpoints/models.zip") folder from which checkpoints of models are read from: $HOME/tensorflow/log
 It is best to download the log folder and save it on the correct relative path.
