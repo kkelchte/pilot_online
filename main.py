@@ -63,6 +63,10 @@ tf.app.flags.DEFINE_string("network", 'mobile_small', "Define the type of networ
 tf.app.flags.DEFINE_boolean("auxiliary_depth", True, "Specify whether a depth map is predicted.")
 tf.app.flags.DEFINE_boolean("auxiliary_ctr", False, "Specify whether control should be predicted besides RL.")
 tf.app.flags.DEFINE_boolean("auxiliary_odom", True, "Specify whether the odometry or change in x,y,z,Y is predicted.")
+
+tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-2, 1)")
+tf.app.flags.DEFINE_float("learning_rate", 0.5, "Start learning rate.")
+
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 tf.app.flags.DEFINE_boolean("lstm", False, "In case of True, cnn-features are fed into LSTM control layers.")
 tf.app.flags.DEFINE_boolean("n_fc", True, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
@@ -100,7 +104,7 @@ def load_config(modelfolder, file_name = "configuration"):
   print("Load configuration from: ", modelfolder)
   tree = ET.parse(os.path.join(modelfolder,file_name+".xml"))
   boollist=['concatenate_depth','concatenate_odom','lstm','auxiliary_odom',
-  'n_fc','feed_previous_action','auxiliary_depth','depth_input']
+  'n_fc','feed_previous_action','auxiliary_depth','depth_input','extra_control_layer']
   intlist=['odom_hidden_units','n_frames','lstm_hiddensize']
   floatlist=[]
   stringlist=['network']
@@ -124,13 +128,19 @@ def load_config(modelfolder, file_name = "configuration"):
 
 # Use the main method for starting the training procedure and closing it in the end.
 def main(_):
+  # some startup settings
+  np.random.seed(FLAGS.random_seed)
+  tf.set_random_seed(FLAGS.random_seed)
+  if FLAGS.random_learning_rate:
+    FLAGS.learning_rate = 10**np.random.uniform(-2,0)
+    
   if FLAGS.load_config:
     checkpoint_path = FLAGS.checkpoint_path
     if checkpoint_path[0]!='/': checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',checkpoint_path)
     if not os.path.isfile(checkpoint_path+'/checkpoint'):
       checkpoint_path = checkpoint_path+'/'+[mpath for mpath in sorted(os.listdir(checkpoint_path)) if os.path.isdir(checkpoint_path+'/'+mpath) and os.path.isfile(checkpoint_path+'/'+mpath+'/checkpoint')][-1]
     load_config(checkpoint_path)
-
+    
   summary_dir = os.path.join(os.getenv('HOME'),FLAGS.summary_dir)
   # summary_dir = FLAGS.summary_dir
   print("summary dir: {}".format(summary_dir))
@@ -143,10 +153,6 @@ def main(_):
       raise NameError( 'Logfolder already exists, overwriting alert: '+ summary_dir+FLAGS.log_tag ) 
   os.mkdir(summary_dir+FLAGS.log_tag)
   save_config(summary_dir+FLAGS.log_tag)
-    
-  # some startup settings
-  np.random.seed(FLAGS.random_seed)
-  tf.set_random_seed(FLAGS.random_seed)
     
   #define the size of the network input
   if FLAGS.network == 'inception':

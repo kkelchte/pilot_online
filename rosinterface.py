@@ -169,6 +169,7 @@ class PilotNode(object):
       self.exploration_noise.reset()
       self.speed=FLAGS.speed + (not FLAGS.evaluate)*np.random.uniform(-FLAGS.sigma_x, FLAGS.sigma_x)
       if rospy.has_param('evaluate') and not FLAGS.real:
+        # FLAGS.evaluate = False
         FLAGS.evaluate = rospy.get_param('evaluate')
         print '--> set evaluate to: ',FLAGS.evaluate
       # if FLAGS.lstm:
@@ -554,7 +555,8 @@ class PilotNode(object):
             depth_targets=aux_info['target_depth'].reshape(-1,55,74)
             # depth_targets=aux_info['target_depth'].reshape(-1,55,74) if not FLAGS.lstm else aux_info['target_depth'].reshape(-1,FLAGS.num_steps, 55,74)
           if FLAGS.auxiliary_odom: 
-            odom_targets=aux_info['target_odom'].reshape(-1,6) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 6)
+            odom_targets=aux_info['target_odom'].reshape(-1,4) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 4)
+            # odom_targets=aux_info['target_odom'].reshape(-1,6) if not FLAGS.lstm else aux_info['target_odom'].reshape(-1,FLAGS.num_steps, 6)
             prev_action=aux_info['prev_action'].reshape(-1,1) #if not FLAGS.lstm else aux_info['prev_action'].reshape(-1,FLAGS.num_steps, 1)
           # todo add initial state for each rollout in the batch
           controls, losses = self.model.backward(inputs,init_state,targets[:].reshape(-1,1),depth_targets, odom_targets, prev_action)

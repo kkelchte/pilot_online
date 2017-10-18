@@ -29,9 +29,8 @@ tf.app.flags.DEFINE_float("weight_decay", 0.00004, "Weight decay of inception ne
 # Std of uniform initialization
 tf.app.flags.DEFINE_float("init_scale", 0.0005, "Std of uniform initialization")
 # Base learning rate
-tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-4, 1)")
-tf.app.flags.DEFINE_float("learning_rate", 0.5, "Start learning rate.")
-tf.app.flags.DEFINE_float("depth_weight", 10, "Define the weight applied to the depth values in the loss relative to the control loss.")
+tf.app.flags.DEFINE_float("depth_weight", 1, "Define the weight applied to the depth values in the loss relative to the control loss.")
+tf.app.flags.DEFINE_float("control_weight", 1, "Define the weight applied to the control loss.")
 tf.app.flags.DEFINE_float("odom_weight", 1, "Define the weight applied to the odometry values in the loss relative to the control loss.")
 # Specify where the Model, trained on ImageNet, was saved.
 tf.app.flags.DEFINE_string("model_path", 'mobilenet_small', "Specify where the Model, trained on ImageNet, was saved: PATH/TO/vgg_16.ckpt, inception_v3.ckpt or ")
@@ -146,7 +145,10 @@ class Model(object):
           'fully_connected_1/biases':slim.get_unique_variable('Depth_Estimate_V1/fully_connected_1/biases')
           }
     else: #If continue training
-      variables_to_restore = slim.get_variables_to_restore()
+      list_to_exclude=[]
+      if not FLAGS.auxiliary_odom: list_to_exclude.append("aux_odom")
+      if not FLAGS.auxiliary_depth: list_to_exclude.append("MobilenetV1/aux_depth")
+      variables_to_restore = slim.get_variables_to_restore(exclude=list_to_exclude)
       if FLAGS.checkpoint_path[0]!='/':
         checkpoint_path = os.path.join(os.getenv('HOME'),'tensorflow/log',FLAGS.checkpoint_path)
       else:
@@ -348,7 +350,7 @@ class Model(object):
       self.targets = tf.placeholder(tf.float32, [None, self.output_size])
       # self.loss = losses.mean_squared_error(tf.clip_by_value(self.outputs,1e-10,1.0), self.targets)
       if not FLAGS.rl or FLAGS.auxiliary_ctr:
-        self.loss = tf.losses.mean_squared_error(self.outputs, self.targets)
+        self.loss = tf.losses.mean_squared_error(self.outputs, self.targets, weights=FLAGS.control_weight)
       if FLAGS.freeze:
         FLAGS.depth_weight=0
         FLAGS.odom_weight=0
