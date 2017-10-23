@@ -64,14 +64,13 @@ tf.app.flags.DEFINE_boolean("auxiliary_depth", True, "Specify whether a depth ma
 tf.app.flags.DEFINE_boolean("auxiliary_ctr", False, "Specify whether control should be predicted besides RL.")
 tf.app.flags.DEFINE_boolean("auxiliary_odom", True, "Specify whether the odometry or change in x,y,z,Y is predicted.")
 
-tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-2, 1)")
 tf.app.flags.DEFINE_float("learning_rate", 0.5, "Start learning rate.")
+tf.app.flags.DEFINE_boolean("random_learning_rate", False, "Use sampled learning rate from UL(10**-2, 1)")
 
 tf.app.flags.DEFINE_boolean("plot_depth", False, "Specify whether the depth predictions is saved as images.")
 tf.app.flags.DEFINE_boolean("lstm", False, "In case of True, cnn-features are fed into LSTM control layers.")
 tf.app.flags.DEFINE_boolean("n_fc", True, "In case of True, prelogit features are concatenated before feeding to the fully connected layers.")
 tf.app.flags.DEFINE_integer("n_frames", 3, "Specify the amount of frames concatenated in case of n_fc.")
-tf.app.flags.DEFINE_integer("batch_size", 16, "Define the size of minibatches.")
 tf.app.flags.DEFINE_integer("num_steps", 8, "Define the number of steps the LSTM layers are unrolled.")
 tf.app.flags.DEFINE_integer("lstm_hiddensize", 100, "Define the number of hidden units in the LSTM control layer.")
 
@@ -84,7 +83,7 @@ def save_config(logfolder, file_name = "configuration"):
   """
   save all the FLAG values in a config file / xml file
   """
-  print("Save configuration to: ", logfolder)
+  print("Save configuration to: {}".format(logfolder))
   root = ET.Element("conf")
   flg = ET.SubElement(root, "flags")
   
@@ -131,6 +130,7 @@ def main(_):
   # some startup settings
   np.random.seed(FLAGS.random_seed)
   tf.set_random_seed(FLAGS.random_seed)
+  
   if FLAGS.random_learning_rate:
     FLAGS.learning_rate = 10**np.random.uniform(-2,0)
     
@@ -151,8 +151,9 @@ def main(_):
   else :
     if os.path.isdir(summary_dir+FLAGS.log_tag):
       raise NameError( 'Logfolder already exists, overwriting alert: '+ summary_dir+FLAGS.log_tag ) 
-  os.mkdir(summary_dir+FLAGS.log_tag)
+  os.makedirs(summary_dir+FLAGS.log_tag)
   save_config(summary_dir+FLAGS.log_tag)
+    
     
   #define the size of the network input
   if FLAGS.network == 'inception':
@@ -171,8 +172,8 @@ def main(_):
     state_dim = [1, mobile_net.mobilenet_v1.default_image_size_medium, mobile_net.mobilenet_v1.default_image_size_medium, 3]  
   else:
     raise NameError( 'Network is unknown: ', FLAGS.network)
-    
-  action_dim = 1 #initially only turn and go straight
+
+  action_dim = 1 #only turn in yaw from -1:1
   
   print( "Number of State Dimensions:", state_dim)
   print( "Number of Action Dimensions:", action_dim)
